@@ -1,0 +1,10 @@
+jobs/*.json
+jobs/*.zip
+.DS_Store
+*.log
+.env
+.env.local
+.vscode/
+.idea/
+*.tmp
+*.bak
