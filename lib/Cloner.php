@@ -46,6 +46,8 @@ class Cloner
         $xpath = new DOMXPath($dom);
         $ctasFound = $this->detectAndReplace($xpath, $affiliateLink);
 
+        $this->fixLazyLoadCss($dom);
+
         $processedHtml = $dom->saveHTML();
         $processedHtml = preg_replace('/^<\?xml[^>]*\?>\s*/i', '', $processedHtml);
         $processedHtml = preg_replace('/^<!doctype[^>]*>/i', '<!DOCTYPE html>', $processedHtml);
@@ -58,6 +60,7 @@ class Cloner
             'ctas' => $ctasFound,
             'mode' => $mode,
             'affiliate_link' => $affiliateLink,
+            'source_domain' => $this->extractSourceDomain($html),
             'created_at' => date('Y-m-d H:i:s'),
         ];
     }
@@ -168,6 +171,34 @@ class Cloner
         }
 
         return false;
+    }
+
+    private function fixLazyLoadCss(DOMDocument $dom): void
+    {
+        $xpath = new DOMXPath($dom);
+        $heads = $xpath->query('//head');
+        if ($heads === false || $heads->length === 0) {
+            return;
+        }
+        $head = $heads->item(0);
+
+        $style = $dom->createElement('style');
+        $style->setAttribute('data-cloned-fix', 'true');
+        $css = <<<'CSS'
+:is(.e-con.e-parent,.e-con) { background-image: revert !important; }
+:is(.e-con.e-parent,.e-con) * { background-image: revert !important; }
+img[loading="lazy"] { loading: eager !important; }
+CSS;
+        $style->appendChild($dom->createTextNode($css));
+        $head->appendChild($style);
+    }
+
+    private function extractSourceDomain(string $html): string
+    {
+        if (preg_match('#https?://([a-zA-Z0-9.-]+)#', $html, $m)) {
+            return $m[1];
+        }
+        return '';
     }
 
     public function fetchUrl(string $url): array

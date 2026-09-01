@@ -1,6 +1,7 @@
 <?php
 session_start();
 
+require_once __DIR__ . '/../lib/MediaDownloader.php';
 require_once __DIR__ . '/../lib/ZipBuilder.php';
 
 $jobId = $_GET['job'] ?? '';
@@ -30,11 +31,12 @@ if (isset($jobData['expires_at']) && strtotime($jobData['expires_at']) < time())
 }
 
 $zipBuilder = new ZipBuilder();
+$sourceDomain = $jobData['source_domain'] ?? '';
 
 try {
     switch ($type) {
         case 'wix':
-            $zipPath = $zipBuilder->buildWixEmbed($jobData['html'], $jobId, $jobData['affiliate_link']);
+            $zipPath = $zipBuilder->buildWixEmbed($jobData['html'], $jobId, $jobData['affiliate_link'], $sourceDomain);
             $filename = "landingpage-wix-{$jobId}.zip";
             break;
         case 'hostinger':

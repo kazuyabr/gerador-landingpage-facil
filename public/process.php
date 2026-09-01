@@ -2,6 +2,7 @@
 session_start();
 
 require_once __DIR__ . '/../lib/Cloner.php';
+require_once __DIR__ . '/../lib/MediaDownloader.php';
 require_once __DIR__ . '/../lib/ZipBuilder.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -72,6 +73,7 @@ $jobData = [
     'html' => $result['html'],
     'ctas' => $result['ctas'],
     'affiliate_link' => $affiliateLink,
+    'source_domain' => $result['source_domain'] ?? '',
     'mode' => $mode,
     'created_at' => $result['created_at'],
     'expires_at' => date('Y-m-d H:i:s', time() + 3600),

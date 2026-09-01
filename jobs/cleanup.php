@@ -40,6 +40,7 @@ foreach ($files as $file) {
 $tmpDirs = glob(sys_get_temp_dir() . '/clone_*') ?: [];
 $tmpDirs = array_merge($tmpDirs, glob(sys_get_temp_dir() . '/wix_*') ?: []);
 $tmpDirs = array_merge($tmpDirs, glob(sys_get_temp_dir() . '/hostinger_*') ?: []);
+$tmpDirs = array_merge($tmpDirs, glob(sys_get_temp_dir() . '/media_*') ?: []);
 
 foreach ($tmpDirs as $dir) {
     $mtime = filemtime($dir);

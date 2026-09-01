@@ -2,10 +2,43 @@
 
 class ZipBuilder
 {
+    private ?MediaDownloader $downloader = null;
+
+    private function ensureMediaDownloaded(string $html, string $jobId, string $sourceDomain): string
+    {
+        $this->downloader = new MediaDownloader($jobId);
+        $this->downloader->downloadAndMap($html, $sourceDomain);
+        return $this->downloader->updateHtml($html);
+    }
+
+    private function addMediaToZip(ZipArchive $zip, string $prefix): void
+    {
+        if ($this->downloader === null) {
+            return;
+        }
+        $mediaDir = $this->downloader->getMediaDir();
+        if (!is_dir($mediaDir)) {
+            return;
+        }
+        $it = new RecursiveDirectoryIterator($mediaDir, RecursiveDirectoryIterator::SKIP_DOTS);
+        $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($files as $file) {
+            if ($file->isFile()) {
+                $relative = $prefix . 'media/' . substr($file->getRealPath(), strlen($mediaDir) + 1);
+                $zip->addFile($file->getRealPath(), $relative);
+            }
+        }
+    }
+
     public function buildHtmlZip(string $html, string $jobId, array $metadata = []): string
     {
         if (!class_exists('ZipArchive')) {
             throw new RuntimeException('Extensão ZipArchive não está disponível no PHP');
+        }
+
+        $sourceDomain = $metadata['source_domain'] ?? '';
+        if ($sourceDomain !== '') {
+            $html = $this->ensureMediaDownloaded($html, $jobId, $sourceDomain);
         }
 
         $tmpDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'clone_' . $jobId;
@@ -27,17 +60,27 @@ class ZipBuilder
 
         $zip->addFile($htmlPath, 'index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME.txt', 'LEIA-ME.txt');
+        $this->addMediaToZip($zip, '');
 
         $zip->close();
+
+        if ($this->downloader !== null) {
+            $this->downloader->cleanup();
+            $this->downloader = null;
+        }
 
         return $zipPath;
     }
 
-    public function buildWixEmbed(string $html, string $jobId, string $affiliateLink): string
+    public function buildWixEmbed(string $html, string $jobId, string $affiliateLink, string $sourceDomain = ''): string
     {
         $tmpDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wix_' . $jobId;
         if (!is_dir($tmpDir)) {
             mkdir($tmpDir, 0777, true);
+        }
+
+        if ($sourceDomain !== '') {
+            $html = $this->ensureMediaDownloaded($html, $jobId, $sourceDomain);
         }
 
         $embedHtml = $this->buildWixEmbedContent($affiliateLink);
@@ -55,7 +98,13 @@ class ZipBuilder
         $zip->addFile($htmlHostedPath, 'landingpage/index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'wix-embed.html', 'wix-embed.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME-WIX.txt', 'LEIA-ME-WIX.txt');
+        $this->addMediaToZip($zip, 'landingpage/');
         $zip->close();
+
+        if ($this->downloader !== null) {
+            $this->downloader->cleanup();
+            $this->downloader = null;
+        }
 
         return $zipPath;
     }
@@ -64,6 +113,11 @@ class ZipBuilder
     {
         if (!class_exists('ZipArchive')) {
             throw new RuntimeException('Extensão ZipArchive não está disponível no PHP');
+        }
+
+        $sourceDomain = $metadata['source_domain'] ?? '';
+        if ($sourceDomain !== '') {
+            $html = $this->ensureMediaDownloaded($html, $jobId, $sourceDomain);
         }
 
         $tmpDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'hostinger_' . $jobId;
@@ -89,7 +143,13 @@ class ZipBuilder
         $zip->addFile($htmlPath, 'public_html/index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . '.htaccess', 'public_html/.htaccess');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'INSTRUCOES-HOSTINGER.txt', 'INSTRUCOES-HOSTINGER.txt');
+        $this->addMediaToZip($zip, 'public_html/');
         $zip->close();
+
+        if ($this->downloader !== null) {
+            $this->downloader->cleanup();
+            $this->downloader = null;
+        }
 
         return $zipPath;
     }
@@ -108,6 +168,11 @@ class ZipBuilder
             $ctaList .= "     Para: {$cta['new_href']}\n\n";
         }
 
+        $mediaCount = $metadata['media_count'] ?? 0;
+        $mediaNote = $mediaCount > 0
+            ? "- {$mediaCount} arquivos de mídia (imagens, CSS, fontes) incluídos na pasta media/"
+            : '- As imagens e CSS continuam sendo carregados dos servidores originais';
+
         return <<<TXT
 ========================================
 CLONE DE LANDING PAGE - AFILIADO
@@ -121,15 +186,14 @@ CTAS DETECTADOS E SUBSTITUÍDOS ({$this->count($ctas)}):
 
 COMO USAR:
 ----------
-1. Faça upload do arquivo index.html para sua hospedagem
-2. Pode ser hospedagem comum (Hostinger, Locaweb, etc) ou estática (Vercel, Netlify)
-3. Os links de CTA já estão apontando para seu link de afiliado
+1. Faça upload de TODOS os arquivos para sua hospedagem
+2. Mantenha a estrutura de pastas (se houver pasta media/)
+3. Pode ser hospedagem comum (Hostinger, Locaweb, etc) ou estática (Vercel, Netlify)
+4. Os links de CTA já estão apontando para seu link de afiliado
 
 OBSERVAÇÕES:
 ------------
-- As imagens e CSS continuam sendo carregados dos servidores originais
-- Se o site original sair do ar, as imagens podem quebrar
-- Para isolar tudo, baixe também as imagens e ajuste os caminhos no HTML
+{$mediaNote}
 
 Suporte: Este é um MVP gratuito, sem suporte oficial.
 
