@@ -176,21 +176,95 @@ class Cloner
     private function fixLazyLoadCss(DOMDocument $dom): void
     {
         $xpath = new DOMXPath($dom);
+
+        $styles = $xpath->query('//style');
+        if ($styles !== false) {
+            foreach ($styles as $style) {
+                $content = $style->textContent ?? '';
+                if (preg_match('/e-con\.e-parent.*background-image\s*:\s*none/is', $content)) {
+                    $style->parentNode->removeChild($style);
+                }
+            }
+        }
+
         $heads = $xpath->query('//head');
         if ($heads === false || $heads->length === 0) {
             return;
         }
         $head = $heads->item(0);
 
-        $style = $dom->createElement('style');
-        $style->setAttribute('data-cloned-fix', 'true');
-        $css = <<<'CSS'
-:is(.e-con.e-parent,.e-con) { background-image: revert !important; }
-:is(.e-con.e-parent,.e-con) * { background-image: revert !important; }
-img[loading="lazy"] { loading: eager !important; }
-CSS;
-        $style->appendChild($dom->createTextNode($css));
-        $head->appendChild($style);
+        $fix = $dom->createElement('style');
+        $fix->setAttribute('data-cloned-fix', 'true');
+        $fix->appendChild($dom->createTextNode(<<<'CSS'
+.e-con.e-parent, .e-con.e-parent * { background-image: revert !important; }
+.e-con { background-image: revert !important; }
+.e-con * { background-image: revert !important; }
+CSS
+        ));
+        $head->appendChild($fix);
+
+        $lazyImgs = $xpath->query('//img[@loading="lazy"]');
+        if ($lazyImgs !== false) {
+            foreach ($lazyImgs as $img) {
+                $img->setAttribute('loading', 'eager');
+            }
+        }
+
+        $dataSrcImgs = $xpath->query('//img[@data-src]');
+        if ($dataSrcImgs !== false) {
+            foreach ($dataSrcImgs as $img) {
+                $src = $img->getAttribute('data-src');
+                if ($src !== '') {
+                    $img->setAttribute('src', $src);
+                }
+                $img->removeAttribute('data-src');
+                $img->removeAttribute('data-srcset');
+                $img->removeAttribute('data-sizes');
+                $img->removeAttribute('loading');
+            }
+        }
+
+        $allElements = $xpath->query('//*[@style]');
+        if ($allElements !== false) {
+            foreach ($allElements as $el) {
+                $style = $el->getAttribute('style');
+                if (preg_match('/background-image\s*:\s*none/i', $style)) {
+                    $newStyle = preg_replace('/background-image\s*:\s*none\s*(!important)?\s*;?\s*/i', '', $style);
+                    if (trim($newStyle) === '') {
+                        $el->removeAttribute('style');
+                    } else {
+                        $el->setAttribute('style', trim($newStyle));
+                    }
+                }
+            }
+        }
+
+        $scripts = $xpath->query('//script');
+        if ($scripts !== false) {
+            foreach ($scripts as $script) {
+                $src = $script->getAttribute('src');
+                $content = $script->textContent ?? '';
+                if (str_contains($src, 'lazyload') || str_contains($src, 'lazy-load') ||
+                    str_contains($content, 'lazyloadRunObserver') || str_contains($content, 'e-lazyloaded')) {
+                    $script->parentNode->removeChild($script);
+                }
+            }
+        }
+
+        $allElements = $xpath->query('//*[@style]');
+        if ($allElements !== false) {
+            foreach ($allElements as $el) {
+                $style = $el->getAttribute('style');
+                if (preg_match('/background-image\s*:\s*none/i', $style)) {
+                    $newStyle = preg_replace('/background-image\s*:\s*none\s*;?/i', '', $style);
+                    if (trim($newStyle) === '') {
+                        $el->removeAttribute('style');
+                    } else {
+                        $el->setAttribute('style', trim($newStyle));
+                    }
+                }
+            }
+        }
     }
 
     private function extractSourceDomain(string $html): string
