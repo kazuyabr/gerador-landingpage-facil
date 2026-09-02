@@ -1,8 +1,9 @@
 <?php
 
-require_once __DIR__ . '/../lib/Cloner.php';
-require_once __DIR__ . '/../lib/MediaDownloader.php';
-require_once __DIR__ . '/../lib/ZipBuilder.php';
+require_once __DIR__ . '/../lib/Config.php';
+require_once Config::getLibDir() . '/Cloner.php';
+require_once Config::getLibDir() . '/MediaDownloader.php';
+require_once Config::getLibDir() . '/ZipBuilder.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');
@@ -56,7 +57,7 @@ $cloner = new Cloner();
 $result = $cloner->process($html, $affiliateLink, $mode);
 
 $jobId = bin2hex(random_bytes(8));
-$jobsDir = getenv('VERCEL') ? '/tmp/jobs' : __DIR__ . '/../jobs';
+$jobsDir = Config::getJobsDir();
 if (!is_dir($jobsDir)) {
     mkdir($jobsDir, 0777, true);
 }

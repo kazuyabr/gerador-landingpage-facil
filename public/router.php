@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../lib/Config.php';
+
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $path = __DIR__ . $uri;
 
@@ -11,10 +13,10 @@ if (is_file($candidate)) {
     return false;
 }
 
-$uri = rtrim($uri, '/');
-$scriptName = $_SERVER['SCRIPT_NAME'];
+$uriClean = rtrim($uri, '/');
 
 $routes = [
+    '' => 'index.php',
     '/' => 'index.php',
     '/index.php' => 'index.php',
     '/process' => 'process.php',
@@ -25,8 +27,9 @@ $routes = [
     '/preview.php' => 'preview.php',
 ];
 
-if (isset($routes[$uri])) {
-    require __DIR__ . '/' . $routes[$uri];
+if (isset($routes[$uri]) || isset($routes[$uriClean])) {
+    $target = $routes[$uri] ?? $routes[$uriClean];
+    require __DIR__ . '/' . $target;
     return true;
 }
 

@@ -1,8 +1,9 @@
 <?php
 session_start();
 
-require_once __DIR__ . '/../lib/MediaDownloader.php';
-require_once __DIR__ . '/../lib/ZipBuilder.php';
+require_once __DIR__ . '/../lib/Config.php';
+require_once Config::getLibDir() . '/MediaDownloader.php';
+require_once Config::getLibDir() . '/ZipBuilder.php';
 
 $jobId = $_GET['job'] ?? '';
 $type = $_GET['type'] ?? 'html';
@@ -12,7 +13,7 @@ if ($jobId === '' || !preg_match('/^[a-f0-9]{16}$/', $jobId)) {
     die('Job ID inválido');
 }
 
-$jobFile = (getenv('VERCEL') ? '/tmp/jobs' : __DIR__ . '/../jobs') . '/' . $jobId . '.json';
+$jobFile = Config::getJobsDir() . '/' . $jobId . '.json';
 if (!file_exists($jobFile)) {
     http_response_code(404);
     die('Job não encontrado ou expirado');
