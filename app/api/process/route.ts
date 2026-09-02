@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processHtml, fetchUrl } from '@/lib/cloner';
+import { processHtml, fetchUrl } from '@/lib-next/cloner';
 import { writeFile, mkdir, readdir, unlink, stat } from 'fs/promises';
 import { join } from 'path';
 
