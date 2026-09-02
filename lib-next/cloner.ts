@@ -157,7 +157,7 @@ export async function fetchUrl(url: string): Promise<{ success: boolean; html?: 
         'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
       },
       redirect: 'follow',
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
 
     if (!res.ok) {

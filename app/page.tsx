@@ -56,7 +56,8 @@ function HomeContent() {
     }
   }, [dataB64]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     setLoading(true);
     startRef.current = Date.now();
     let stepIdx = 0;
@@ -69,6 +70,68 @@ function HomeContent() {
         setLoadingStep(steps[stepIdx].text);
       }
     }, 200);
+
+    try {
+      const form = e.currentTarget;
+      const formData = new FormData(form);
+      const data: Record<string, string> = {};
+      formData.forEach((value, key) => { data[key] = value as string; });
+
+      const res = await fetch('/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'process', ...data }),
+      });
+      const json = await res.json();
+
+      if (json.error) {
+        window.location.href = `/?error=${encodeURIComponent(json.error)}`;
+        return;
+      }
+
+      window.location.href = `/?data=${json.data}`;
+    } catch (err: any) {
+      window.location.href = `/?error=${encodeURIComponent(err.message)}`;
+    }
+  };
+
+  const handleDownload = async (type: string) => {
+    if (!pageData) return;
+    try {
+      const res = await fetch('/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'download', data: pageData.data_b64, type }),
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `landingpage${type !== 'html' ? '-' + type : ''}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Erro ao baixar');
+    }
+  };
+
+  const handlePreview = async () => {
+    if (!pageData) return;
+    try {
+      const res = await fetch('/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'preview', data: pageData.data_b64 }),
+      });
+      const html = await res.text();
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
+    } catch (err) {
+      alert('Erro ao gerar preview');
+    }
   };
 
   useEffect(() => {
@@ -101,18 +164,18 @@ function HomeContent() {
             <div className="output-actions">
               <h3>Como voce quer exportar?</h3>
               <div className="buttons-grid">
-                <a className="btn btn-primary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=html`}>
+                <button className="btn btn-primary" onClick={() => handleDownload('html')}>
                   Baixar ZIP (HTML)
-                </a>
-                <a className="btn btn-secondary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=wix`}>
+                </button>
+                <button className="btn btn-secondary" onClick={() => handleDownload('wix')}>
                   Pacote para Wix
-                </a>
-                <a className="btn btn-secondary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=hostinger`}>
+                </button>
+                <button className="btn btn-secondary" onClick={() => handleDownload('hostinger')}>
                   Pacote Hostinger
-                </a>
-                <a className="btn btn-ghost" href={`/api?action=preview&data=${encodeURIComponent(pageData.data_b64)}`} target="_blank">
+                </button>
+                <button className="btn btn-ghost" onClick={handlePreview}>
                   Ver Preview
-                </a>
+                </button>
               </div>
             </div>
 

@@ -15,69 +15,65 @@ function buildReadme(metadata: any): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const affiliateLink = (formData.get('affiliate_link') as string || '').trim();
-    const sourceUrl = (formData.get('source_url') as string || '').trim();
-    const sourceHtml = (formData.get('source_html') as string || '').trim();
+    const body = await req.json();
+    const action = body.action || 'process';
 
-    if (!affiliateLink) {
-      return NextResponse.redirect(new URL('/?error=Link+obrigatorio', req.url));
-    }
+    if (action === 'process') {
+      const affiliateLink = (body.affiliate_link || '').trim();
+      const sourceUrl = (body.source_url || '').trim();
+      const sourceHtml = (body.source_html || '').trim();
 
-    let url = affiliateLink;
-    if (!url.match(/^https?:\/\//i)) url = 'https://' + url;
-
-    let html = '';
-    if (sourceHtml) {
-      html = sourceHtml;
-    } else if (sourceUrl) {
-      const result = await fetchUrl(sourceUrl);
-      if (!result.success) {
-        return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(result.error || 'Fetch failed')}`, req.url));
+      if (!affiliateLink) {
+        return NextResponse.json({ error: 'Link obrigatorio' }, { status: 400 });
       }
-      html = result.html!;
-    } else {
-      return NextResponse.redirect(new URL('/?error=Forneca+URL+ou+HTML', req.url));
+
+      let url = affiliateLink;
+      if (!url.match(/^https?:\/\//i)) url = 'https://' + url;
+
+      let html = '';
+      if (sourceHtml) {
+        html = sourceHtml;
+      } else if (sourceUrl) {
+        const result = await fetchUrl(sourceUrl);
+        if (!result.success) {
+          return NextResponse.json({ error: result.error || 'Fetch failed' }, { status: 400 });
+        }
+        html = result.html!;
+      } else {
+        return NextResponse.json({ error: 'Forneca URL ou HTML' }, { status: 400 });
+      }
+
+      if (html.length < 200) {
+        return NextResponse.json({ error: 'HTML muito pequeno' }, { status: 400 });
+      }
+
+      const processed = processHtml(html, url);
+      const metadata = {
+        ctas: processed.ctas,
+        affiliate_link: url,
+        source_domain: processed.source_domain,
+        created_at: new Date().toISOString(),
+      };
+
+      const b64 = Buffer.from(JSON.stringify({ html: processed.html, metadata })).toString('base64');
+      return NextResponse.json({ data: b64 });
     }
 
-    if (html.length < 200) {
-      return NextResponse.redirect(new URL('/?error=HTML+muito+pequeno', req.url));
-    }
+    if (action === 'download' || action === 'preview') {
+      const dataB64 = body.data || '';
+      if (!dataB64) {
+        return NextResponse.json({ error: 'Dados obrigatorios' }, { status: 400 });
+      }
 
-    const processed = processHtml(html, url);
-    const metadata = {
-      ctas: processed.ctas,
-      affiliate_link: url,
-      source_domain: processed.source_domain,
-      created_at: new Date().toISOString(),
-    };
-
-    const b64 = Buffer.from(JSON.stringify({ html: processed.html, metadata })).toString('base64');
-    return NextResponse.redirect(new URL(`/?data=${b64}`, req.url));
-  } catch (e: any) {
-    return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(e.message)}`, req.url));
-  }
-}
-
-export async function GET(req: NextRequest) {
-  const action = req.nextUrl.searchParams.get('action');
-  const dataB64 = req.nextUrl.searchParams.get('data') || '';
-
-  if (action === 'preview' && dataB64) {
-    try {
       const data = JSON.parse(Buffer.from(dataB64, 'base64').toString());
-      return new NextResponse(data.html, {
-        headers: { 'Content-Type': 'text/html; charset=UTF-8' },
-      });
-    } catch {
-      return new NextResponse('Dados invalidos', { status: 400 });
-    }
-  }
 
-  if (action === 'download' && dataB64) {
-    try {
-      const data = JSON.parse(Buffer.from(dataB64, 'base64').toString());
-      const type = req.nextUrl.searchParams.get('type') || 'html';
+      if (action === 'preview') {
+        return new NextResponse(data.html, {
+          headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+        });
+      }
+
+      const type = body.type || 'html';
       const zip = new JSZip();
 
       if (type === 'wix') {
@@ -99,10 +95,10 @@ export async function GET(req: NextRequest) {
           'Content-Disposition': `attachment; filename="${filename}"`,
         },
       });
-    } catch {
-      return new NextResponse('Dados invalidos', { status: 400 });
     }
-  }
 
-  return new NextResponse('Not found', { status: 404 });
+    return NextResponse.json({ error: 'Acao invalida' }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
 }
