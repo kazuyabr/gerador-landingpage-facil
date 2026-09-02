@@ -1,12 +1,27 @@
 <?php
-session_start();
-
 require_once __DIR__ . '/../lib/Cloner.php';
 require_once __DIR__ . '/../lib/ZipBuilder.php';
 
-$error = $_SESSION['error'] ?? null;
-$result = $_SESSION['result'] ?? null;
-unset($_SESSION['error'], $_SESSION['result']);
+$error = $_GET['error'] ?? null;
+$jobId = $_GET['job'] ?? null;
+$result = null;
+
+if ($jobId && preg_match('/^[a-f0-9]{16}$/', $jobId)) {
+    $jobsDir = getenv('VERCEL') ? '/tmp/jobs' : __DIR__ . '/../jobs';
+    $jobFile = $jobsDir . '/' . $jobId . '.json';
+
+    if (file_exists($jobFile)) {
+        $jobData = json_decode(file_get_contents($jobFile), true);
+        if ($jobData && isset($jobData['html'])) {
+            $result = [
+                'job_id' => $jobData['job_id'],
+                'ctas' => $jobData['ctas'] ?? [],
+                'affiliate_link' => $jobData['affiliate_link'] ?? '',
+                'created_at' => $jobData['created_at'] ?? '',
+            ];
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -19,7 +34,7 @@ unset($_SESSION['error'], $_SESSION['result']);
 <body>
   <div class="app">
     <header class="app-header">
-      <h1>🚀 Gerador de Landing Page para Afiliados</h1>
+      <h1>Gerador de Landing Page para Afiliados</h1>
       <p class="subtitle">Cole o HTML de uma landing page + seu link de afiliado e receba o clone pronto para hospedar.</p>
     </header>
 
@@ -33,13 +48,13 @@ unset($_SESSION['error'], $_SESSION['result']);
       <?php if ($result): ?>
         <section class="result-card">
           <div class="result-header">
-            <h2>✅ Clone gerado com sucesso</h2>
+            <h2>Clone gerado com sucesso</h2>
             <span class="badge"><?= count($result['ctas']) ?> CTA(s) detectado(s)</span>
           </div>
 
           <?php if (!empty($result['ctas'])): ?>
             <details class="ctas-list" open>
-              <summary>CTAs que foram substituídos</summary>
+              <summary>CTAs que foram substituidos</summary>
               <ul>
                 <?php foreach ($result['ctas'] as $i => $cta): ?>
                   <li>
@@ -54,36 +69,36 @@ unset($_SESSION['error'], $_SESSION['result']);
               </ul>
             </details>
           <?php else: ?>
-            <p class="warning">⚠️ Nenhum CTA de checkout foi detectado. Verifique se a página tem botões com links de checkout (Hotmart, Kiwify, etc).</p>
+            <p class="warning">Nenhum CTA de checkout foi detectado. Verifique se a pagina tem botoes com links de checkout (Hotmart, Kiwify, etc).</p>
           <?php endif; ?>
 
           <div class="output-actions">
-            <h3>Como você quer exportar?</h3>
+            <h3>Como voce quer exportar?</h3>
             <div class="buttons-grid">
               <a class="btn btn-primary" href="download.php?job=<?= urlencode($result['job_id']) ?>&type=html">
-                📦 Baixar ZIP (HTML)
+                Baixar ZIP (HTML)
               </a>
               <a class="btn btn-secondary" href="download.php?job=<?= urlencode($result['job_id']) ?>&type=wix">
-                🌐 Pacote para Wix
+                Pacote para Wix
               </a>
               <a class="btn btn-secondary" href="download.php?job=<?= urlencode($result['job_id']) ?>&type=hostinger">
-                ☁ Pacote Hostinger
+                Pacote Hostinger
               </a>
               <a class="btn btn-ghost" href="preview.php?job=<?= urlencode($result['job_id']) ?>" target="_blank">
-                🔗 Ver Preview
+                Ver Preview
               </a>
             </div>
           </div>
 
           <div class="new-clone">
-            <a href="index.php">← Fazer outro clone</a>
+            <a href="index.php">Fazer outro clone</a>
           </div>
         </section>
       <?php else: ?>
         <form action="process.php" method="POST" class="clone-form" id="cloneForm">
           <div class="form-group">
             <label for="affiliate_link">
-              🔗 Link do Afiliado (CTA)
+              Link do Afiliado (CTA)
               <span class="required">*</span>
             </label>
             <input
@@ -92,21 +107,20 @@ unset($_SESSION['error'], $_SESSION['result']);
               name="affiliate_link"
               required
               placeholder="https://go.hotmart.com/SEU_ID?off=..."
-              value="<?= htmlspecialchars($_POST['affiliate_link'] ?? '') ?>"
+              value="<?= htmlspecialchars($_GET['affiliate'] ?? '') ?>"
             >
-            <small>Este link substituirá todos os botões de checkout da landing page.</small>
+            <small>Este link substituira todos os botoes de checkout da landing page.</small>
           </div>
 
           <div class="form-group">
             <label for="source_url">
-              🌐 URL da Landing Page (opcional)
+              URL da Landing Page (opcional)
             </label>
             <input
               type="url"
               id="source_url"
               name="source_url"
               placeholder="https://youtubesemaparecer.com.br/"
-              value="<?= htmlspecialchars($_POST['source_url'] ?? '') ?>"
             >
             <small>Se o site for simples, o sistema tenta buscar sozinho. Se for Wix ou SPA, use o modo de colar HTML abaixo.</small>
           </div>
@@ -117,26 +131,26 @@ unset($_SESSION['error'], $_SESSION['result']);
 
           <div class="form-group">
             <label for="source_html">
-              📋 Cole o HTML da Landing Page
+              Cole o HTML da Landing Page
               <span class="required">*</span>
             </label>
             <textarea
               id="source_html"
               name="source_html"
               rows="12"
-              placeholder='Abra o site no navegador, pressione Ctrl+U, copie tudo (Ctrl+A, Ctrl+C) e cole aqui.'><?= htmlspecialchars($_POST['source_html'] ?? '') ?></textarea>
+              placeholder='Abra o site no navegador, pressione Ctrl+U, copie tudo (Ctrl+A, Ctrl+C) e cole aqui.'></textarea>
             <small>
-              Dica: No navegador, pressione <kbd>Ctrl</kbd>+<kbd>U</kbd> para ver o código-fonte, depois
+              Dica: No navegador, pressione <kbd>Ctrl</kbd>+<kbd>U</kbd> para ver o codigo-fonte, depois
               <kbd>Ctrl</kbd>+<kbd>A</kbd> e <kbd>Ctrl</kbd>+<kbd>C</kbd> para copiar tudo.
             </small>
           </div>
 
           <button type="submit" class="btn btn-primary btn-large" id="submitBtn">
-            ⚡ Clonar Landing Page
+            Clonar Landing Page
           </button>
 
           <p class="form-note">
-            🔒 Processamento 100% local. Nenhum dado é armazenado em banco. Os arquivos temporários são apagados em 1h.
+            Processamento 100% local. Nenhum dado e armazenado em banco. Os arquivos temporarios sao apagados em 1h.
           </p>
         </form>
       <?php endif; ?>

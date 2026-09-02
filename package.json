@@ -1,0 +1,9 @@
+{
+  "name": "gerador-landingpage-facil",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'No build step needed'",
+    "dev": "php -S localhost:8765 -t public"
+  }
+}

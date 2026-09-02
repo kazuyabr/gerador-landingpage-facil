@@ -7,7 +7,7 @@ if ($jobId === '' || !preg_match('/^[a-f0-9]{16}$/', $jobId)) {
     die('Job ID inválido');
 }
 
-$jobFile = __DIR__ . '/../jobs/' . $jobId . '.json';
+$jobFile = (getenv('VERCEL') ? '/tmp/jobs' : __DIR__ . '/../jobs') . '/' . $jobId . '.json';
 if (!file_exists($jobFile)) {
     http_response_code(404);
     die('Job não encontrado ou expirado. Gere um novo clone.');
