@@ -1,14 +1,8 @@
-node_modules/
-.next/
-.vercel/
+.DS_Store
 *.zip
 jobs/*.json
 jobs/*.zip
 jobs/media_*
-.DS_Store
-test-*
-*.ps1
 .claude/
 .cortex/
 .vibecoding/
-.vercel
