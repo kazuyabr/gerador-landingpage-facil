@@ -147,6 +147,18 @@ unset($_SESSION['error'], $_SESSION['result']);
     </footer>
   </div>
 
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-box">
+      <div class="loading-spinner"></div>
+      <div class="loading-title">Processando sua landing page</div>
+      <div class="loading-step" id="loadingStep">Preparando...</div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill indeterminate" id="progressFill"></div>
+      </div>
+      <div class="loading-time" id="loadingTime"></div>
+    </div>
+  </div>
+
   <script src="assets/app.js"></script>
 </body>
 </html>

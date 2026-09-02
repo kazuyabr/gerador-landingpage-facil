@@ -277,6 +277,7 @@ CSS
         }
 
         $fontExts = ['woff2', 'woff', 'ttf', 'eot', 'otf', 'svg'];
+        $cssBlocks = [];
 
         foreach ($links as $link) {
             $href = $link->getAttribute('href');
@@ -290,51 +291,122 @@ CSS
             }
 
             $baseUrl = rtrim(preg_replace('#/[^/]*$#', '/', $href), '/') . '/';
-            $hasFontUrls = false;
+            $fontUrls = [];
 
-            $cssContent = preg_replace_callback(
+            preg_match_all(
                 '/url\(\s*["\']?([^"\')\s]+)["\']?\s*\)/i',
-                function ($m) use ($baseUrl, $fontExts, &$hasFontUrls) {
-                    $url = trim($m[1]);
-                    if (preg_match('#^data:#i', $url)) {
-                        return $m[0];
-                    }
-                    $path = parse_url($url, PHP_URL_PATH) ?? $url;
-                    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-                    if (!in_array($ext, $fontExts, true)) {
-                        return $m[0];
-                    }
-                    $fullUrl = preg_match('#^https?://#i', $url) ? $url : $baseUrl . $url;
-                    $fontData = $this->httpGet($fullUrl);
-                    if ($fontData === false) {
-                        return $m[0];
-                    }
-                    $hasFontUrls = true;
-                    $encoded = base64_encode($fontData);
-                    $mime = match ($ext) {
-                        'woff2' => 'font/woff2',
-                        'woff' => 'font/woff',
-                        'ttf' => 'font/ttf',
-                        'eot' => 'application/vnd.ms-fontobject',
-                        'otf' => 'font/otf',
-                        'svg' => 'image/svg+xml',
-                        default => 'application/octet-stream',
-                    };
-                    return "url(data:{$mime};base64,{$encoded})";
-                },
-                $cssContent
+                $cssContent,
+                $urlMatches,
+                PREG_SET_ORDER
             );
 
-            if (!$hasFontUrls) {
-                continue;
+            foreach ($urlMatches as $m) {
+                $url = trim($m[1]);
+                if (preg_match('#^data:#i', $url)) {
+                    continue;
+                }
+                $path = parse_url($url, PHP_URL_PATH) ?? $url;
+                $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+                if (!in_array($ext, $fontExts, true)) {
+                    continue;
+                }
+                $fullUrl = preg_match('#^https?://#i', $url) ? $url : $baseUrl . $url;
+                $fontUrls[$m[0]] = ['url' => $fullUrl, 'ext' => $ext];
+            }
+
+            if (!empty($fontUrls)) {
+                $cssBlocks[] = [
+                    'link' => $link,
+                    'css' => $cssContent,
+                    'fonts' => $fontUrls,
+                ];
+            }
+        }
+
+        if (empty($cssBlocks)) {
+            return;
+        }
+
+        $allFontUrls = [];
+        foreach ($cssBlocks as $block) {
+            foreach ($block['fonts'] as $original => $info) {
+                $allFontUrls[$info['url']] = $info['ext'];
+            }
+        }
+
+        $fontData = $this->httpGetMulti($allFontUrls);
+
+        foreach ($cssBlocks as $block) {
+            $cssContent = $block['css'];
+            foreach ($block['fonts'] as $original => $info) {
+                $data = $fontData[$info['url']] ?? false;
+                if ($data === false) {
+                    continue;
+                }
+                $encoded = base64_encode($data);
+                $mime = match ($info['ext']) {
+                    'woff2' => 'font/woff2',
+                    'woff' => 'font/woff',
+                    'ttf' => 'font/ttf',
+                    'eot' => 'application/vnd.ms-fontobject',
+                    'otf' => 'font/otf',
+                    'svg' => 'image/svg+xml',
+                    default => 'application/octet-stream',
+                };
+                $replacement = "url(data:{$mime};base64,{$encoded})";
+                $cssContent = str_replace($original, $replacement, $cssContent);
             }
 
             $style = $dom->createElement('style');
             $style->setAttribute('data-fonts-localized', 'true');
             $style->appendChild($dom->createTextNode($cssContent));
-            $link->parentNode->insertBefore($style, $link);
-            $link->parentNode->removeChild($link);
+            $block['link']->parentNode->insertBefore($style, $block['link']);
+            $block['link']->parentNode->removeChild($block['link']);
         }
+    }
+
+    private function httpGetMulti(array $urlMap): array
+    {
+        if (empty($urlMap)) {
+            return [];
+        }
+
+        $mh = curl_multi_init();
+        $handles = [];
+        $results = [];
+
+        foreach ($urlMap as $url => $ext) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_TIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win6; x64) AppleWebKit/537.36',
+                CURLOPT_HTTPHEADER => ['Accept: */*'],
+            ]);
+            curl_multi_add_handle($mh, $ch);
+            $handles[(int) $ch] = ['url' => $url, 'handle' => $ch];
+        }
+
+        do {
+            $status = curl_multi_exec($mh, $active);
+            if ($active) {
+                curl_multi_select($mh, 0.1);
+            }
+        } while ($active && $status === CURLM_OK);
+
+        foreach ($handles as $info) {
+            $data = curl_multi_getcontent($info['handle']);
+            $code = curl_getinfo($info['handle'], CURLINFO_HTTP_CODE);
+            $results[$info['url']] = ($data !== false && $code < 400 && strlen($data) > 0) ? $data : false;
+            curl_multi_remove_handle($mh, $info['handle']);
+            curl_close($info['handle']);
+        }
+
+        curl_multi_close($mh);
+        return $results;
     }
 
     private function httpGet(string $url, string $accept = '*/*'): string|false
