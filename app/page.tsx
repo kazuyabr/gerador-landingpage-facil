@@ -11,8 +11,8 @@ interface CtaInfo {
   type: string;
 }
 
-interface JobData {
-  job_id: string;
+interface PageData {
+  data_b64: string;
   ctas: CtaInfo[];
   affiliate_link: string;
   created_at: string;
@@ -20,10 +20,10 @@ interface JobData {
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  const jobId = searchParams.get('job');
+  const dataB64 = searchParams.get('data');
   const error = searchParams.get('error');
 
-  const [job, setJob] = useState<JobData | null>(null);
+  const [pageData, setPageData] = useState<PageData | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState('Preparando...');
   const [loadingTime, setLoadingTime] = useState(0);
@@ -41,15 +41,20 @@ function HomeContent() {
   ];
 
   useEffect(() => {
-    if (jobId) {
-      setJob({
-        job_id: jobId,
-        ctas: [],
-        affiliate_link: '',
-        created_at: new Date().toISOString(),
-      });
+    if (dataB64) {
+      try {
+        const decoded = JSON.parse(atob(dataB64));
+        setPageData({
+          data_b64: dataB64,
+          ctas: decoded.metadata?.ctas || [],
+          affiliate_link: decoded.metadata?.affiliate_link || '',
+          created_at: decoded.metadata?.created_at || new Date().toISOString(),
+        });
+      } catch {
+        // invalid data
+      }
     }
-  }, [jobId]);
+  }, [dataB64]);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     setLoading(true);
@@ -86,26 +91,26 @@ function HomeContent() {
           </div>
         )}
 
-        {job ? (
+        {pageData ? (
           <section className="result-card">
             <div className="result-header">
               <h2>Clone gerado com sucesso</h2>
-              <span className="badge">CTA(s) detectado(s)</span>
+              <span className="badge">{pageData.ctas.length} CTA(s) detectado(s)</span>
             </div>
 
             <div className="output-actions">
               <h3>Como voce quer exportar?</h3>
               <div className="buttons-grid">
-                <a className="btn btn-primary" href={`/api?action=download&job=${job.job_id}&type=html`}>
+                <a className="btn btn-primary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=html`}>
                   Baixar ZIP (HTML)
                 </a>
-                <a className="btn btn-secondary" href={`/api?action=download&job=${job.job_id}&type=wix`}>
+                <a className="btn btn-secondary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=wix`}>
                   Pacote para Wix
                 </a>
-                <a className="btn btn-secondary" href={`/api?action=download&job=${job.job_id}&type=hostinger`}>
+                <a className="btn btn-secondary" href={`/api?action=download&data=${encodeURIComponent(pageData.data_b64)}&type=hostinger`}>
                   Pacote Hostinger
                 </a>
-                <a className="btn btn-ghost" href={`/api?action=preview&job=${job.job_id}`} target="_blank">
+                <a className="btn btn-ghost" href={`/api?action=preview&data=${encodeURIComponent(pageData.data_b64)}`} target="_blank">
                   Ver Preview
                 </a>
               </div>
@@ -167,7 +172,7 @@ function HomeContent() {
             </button>
 
             <p className="form-note">
-              Processamento 100% local. Nenhum dado e armazenado em banco. Os arquivos temporarios sao apagados em 1h.
+              Processamento 100% local. Nenhum dado e armazenado em banco.
             </p>
           </form>
         )}
