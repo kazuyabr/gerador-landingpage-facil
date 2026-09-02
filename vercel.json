@@ -1,17 +1,6 @@
 {
-  "functions": {
-    "api/*.php": {
-      "runtime": "vercel-php@0.9.0",
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  },
-  "outputDirectory": "public",
-  "routes": [
-    { "src": "/assets/(.*)", "dest": "/public/assets/$1" },
-    { "src": "/process", "dest": "/api/process.php" },
-    { "src": "/preview", "dest": "/api/preview.php" },
-    { "src": "/download", "dest": "/api/download.php" },
-    { "src": "/(.*)", "dest": "/api/index.php" }
-  ]
+  "buildCommand": "cd vercel-app && npm install && npm run build",
+  "outputDirectory": "vercel-app/.next",
+  "framework": "nextjs",
+  "installCommand": "cd vercel-app && npm install"
 }
