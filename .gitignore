@@ -11,3 +11,4 @@ test-*
 .claude/
 .cortex/
 .vibecoding/
+.vercel
