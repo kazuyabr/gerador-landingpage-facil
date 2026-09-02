@@ -1,11 +1,11 @@
 services:
   app:
-    build: ./php-app
+    build: .
     container_name: gerador-landingpage
     ports:
       - "8765:8080"
     volumes:
-      - ./php-app:/app
-      - ./php-app/jobs:/app/jobs
+      - .:/app
+      - ./jobs:/app/jobs
     working_dir: /app
     restart: unless-stopped
