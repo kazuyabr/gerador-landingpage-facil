@@ -96,16 +96,16 @@ function HomeContent() {
             <div className="output-actions">
               <h3>Como voce quer exportar?</h3>
               <div className="buttons-grid">
-                <a className="btn btn-primary" href={`/api/download?job=${job.job_id}&type=html`}>
+                <a className="btn btn-primary" href={`/api?action=download&job=${job.job_id}&type=html`}>
                   Baixar ZIP (HTML)
                 </a>
-                <a className="btn btn-secondary" href={`/api/download?job=${job.job_id}&type=wix`}>
+                <a className="btn btn-secondary" href={`/api?action=download&job=${job.job_id}&type=wix`}>
                   Pacote para Wix
                 </a>
-                <a className="btn btn-secondary" href={`/api/download?job=${job.job_id}&type=hostinger`}>
+                <a className="btn btn-secondary" href={`/api?action=download&job=${job.job_id}&type=hostinger`}>
                   Pacote Hostinger
                 </a>
-                <a className="btn btn-ghost" href={`/api/preview?job=${job.job_id}`} target="_blank">
+                <a className="btn btn-ghost" href={`/api?action=preview&job=${job.job_id}`} target="_blank">
                   Ver Preview
                 </a>
               </div>
@@ -116,7 +116,7 @@ function HomeContent() {
             </div>
           </section>
         ) : (
-          <form action="/api/process" method="POST" className="clone-form" id="cloneForm" onSubmit={handleSubmit}>
+          <form action="/api" method="POST" className="clone-form" id="cloneForm" onSubmit={handleSubmit}>
             <div className="form-group">
               <label htmlFor="affiliate_link">
                 Link do Afiliado (CTA)
