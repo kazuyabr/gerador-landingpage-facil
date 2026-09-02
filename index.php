@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/../lib/Config.php';
+require_once __DIR__ . '/lib/Config.php';
 require_once Config::getLibDir() . '/Cloner.php';
 require_once Config::getLibDir() . '/ZipBuilder.php';
 
@@ -8,7 +8,7 @@ $jobId = $_GET['job'] ?? null;
 $result = null;
 
 if ($jobId && preg_match('/^[a-f0-9]{16}$/', $jobId)) {
-    $jobsDir = getenv('VERCEL') ? '/tmp/jobs' : __DIR__ . '/../jobs';
+    $jobsDir = Config::getJobsDir();
     $jobFile = $jobsDir . '/' . $jobId . '.json';
 
     if (file_exists($jobFile)) {
