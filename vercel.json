@@ -1,15 +1,13 @@
 {
-  "builds": [
-    {
-      "src": "*.php",
-      "use": "@vercel-php"
+  "functions": {
+    "api/*.php": {
+      "runtime": "vercel-php@0.9.0",
+      "memory": 1024,
+      "maxDuration": 60
     }
-  ],
+  },
   "outputDirectory": "public",
   "routes": [
-    {
-      "src": "/assets/(.*)",
-      "dest": "/public/assets/$1"
-    }
+    { "src": "/assets/(.*)", "dest": "/public/assets/$1" }
   ]
 }

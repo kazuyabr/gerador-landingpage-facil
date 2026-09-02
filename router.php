@@ -32,23 +32,18 @@ if (strpos($uri, '/assets/') === 0) {
     return true;
 }
 
-$filePath = __DIR__ . $uri;
-if ($uri !== '/' && file_exists($filePath) && !is_dir($filePath) && pathinfo($filePath, PATHINFO_EXTENSION) !== 'php') {
-    return false;
-}
-
 $uriClean = rtrim($uri, '/');
 
 $routes = [
-    '' => 'index.php',
-    '/' => 'index.php',
-    '/index.php' => 'index.php',
-    '/process' => 'process.php',
-    '/process.php' => 'process.php',
-    '/download' => 'download.php',
-    '/download.php' => 'download.php',
-    '/preview' => 'preview.php',
-    '/preview.php' => 'preview.php',
+    '' => 'api/index.php',
+    '/' => 'api/index.php',
+    '/index.php' => 'api/index.php',
+    '/process' => 'api/process.php',
+    '/process.php' => 'api/process.php',
+    '/download' => 'api/download.php',
+    '/download.php' => 'api/download.php',
+    '/preview' => 'api/preview.php',
+    '/preview.php' => 'api/preview.php',
 ];
 
 if (isset($routes[$uri]) || isset($routes[$uriClean])) {
