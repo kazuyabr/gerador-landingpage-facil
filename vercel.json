@@ -1,10 +1,15 @@
 {
-  "headers": [
+  "builds": [
     {
-      "source": "/assets/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
-      ]
+      "src": "*.php",
+      "use": "@vercel-php"
+    }
+  ],
+  "outputDirectory": "public",
+  "routes": [
+    {
+      "src": "/assets/(.*)",
+      "dest": "/public/assets/$1"
     }
   ]
 }
