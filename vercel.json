@@ -8,6 +8,10 @@
   },
   "outputDirectory": "public",
   "routes": [
-    { "src": "/assets/(.*)", "dest": "/public/assets/$1" }
+    { "src": "/assets/(.*)", "dest": "/public/assets/$1" },
+    { "src": "/process", "dest": "/api/process.php" },
+    { "src": "/preview", "dest": "/api/preview.php" },
+    { "src": "/download", "dest": "/api/download.php" },
+    { "src": "/(.*)", "dest": "/api/index.php" }
   ]
 }
