@@ -27,10 +27,12 @@ if (isset($jobData['expires_at']) && strtotime($jobData['expires_at']) < time())
     die('Job expirado');
 }
 
+$html = $jobData['html'];
+
 header('Content-Type: text/html; charset=UTF-8');
 header('Referrer-Policy: no-referrer-when-downgrade');
 header('Access-Control-Allow-Origin: *');
 header('X-Content-Type-Options: nosniff');
 
-echo $jobData['html'];
+echo $html;
 exit;

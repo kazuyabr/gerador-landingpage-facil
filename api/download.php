@@ -10,13 +10,13 @@ $type = $_GET['type'] ?? 'html';
 
 if ($jobId === '' || !preg_match('/^[a-f0-9]{16}$/', $jobId)) {
     http_response_code(400);
-    die('Job ID inválido');
+    die('Job ID invalido');
 }
 
 $jobFile = Config::getJobsDir() . '/' . $jobId . '.json';
 if (!file_exists($jobFile)) {
     http_response_code(404);
-    die('Job não encontrado ou expirado');
+    die('Job nao encontrado ou expirado');
 }
 
 $jobData = json_decode(file_get_contents($jobFile), true);
@@ -32,12 +32,11 @@ if (isset($jobData['expires_at']) && strtotime($jobData['expires_at']) < time())
 }
 
 $zipBuilder = new ZipBuilder();
-$sourceDomain = $jobData['source_domain'] ?? '';
 
 try {
     switch ($type) {
         case 'wix':
-            $zipPath = $zipBuilder->buildWixEmbed($jobData['html'], $jobId, $jobData['affiliate_link'], $sourceDomain);
+            $zipPath = $zipBuilder->buildWixEmbed($jobData['html'], $jobId, $jobData['affiliate_link']);
             $filename = "landingpage-wix-{$jobId}.zip";
             break;
         case 'hostinger':
