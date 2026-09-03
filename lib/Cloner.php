@@ -29,9 +29,15 @@ class Cloner
         'checkout-btn',
     ];
 
+    private string $sourceOrigin = '';
+    private string $sourceBaseUrl = '';
+
     public function process(string $html, string $affiliateLink, string $mode = 'paste'): array
     {
         $originalSize = strlen($html);
+
+        $this->sourceOrigin = $this->extractOrigin($html);
+        $this->sourceBaseUrl = $this->extractBaseUrl($html);
 
         $hasDoctype = stripos($html, '<!doctype') !== false || stripos($html, '<!DOCTYPE') !== false;
         $dom = new DOMDocument();
@@ -44,10 +50,12 @@ class Cloner
         libxml_clear_errors();
 
         $xpath = new DOMXPath($dom);
+
         $ctasFound = $this->detectAndReplace($xpath, $affiliateLink);
 
         $this->fixLazyLoadCss($dom);
-        $this->localizeFonts($dom);
+        $this->removeCspHeaders($dom);
+        $this->localizeAllResources($dom);
 
         $processedHtml = $dom->saveHTML();
         $processedHtml = preg_replace('/^<\?xml[^>]*\?>\s*/i', '', $processedHtml);
@@ -119,11 +127,11 @@ class Cloner
         $allButtons = $xpath->query('//button');
         if ($allButtons !== false) {
             foreach ($allButtons as $node) {
-                $class = $node->getAttribute('class');
                 if (!$this->looksLikeCta($node)) {
                     continue;
                 }
                 $text = trim(preg_replace('/\s+/', ' ', $node->textContent));
+                $class = $node->getAttribute('class');
                 $ctas[] = [
                     'old_href' => '(button)',
                     'new_href' => $affiliateLink,
@@ -251,26 +259,202 @@ CSS
                 }
             }
         }
+    }
 
-        $allElements = $xpath->query('//*[@style]');
-        if ($allElements !== false) {
-            foreach ($allElements as $el) {
-                $style = $el->getAttribute('style');
-                if (preg_match('/background-image\s*:\s*none/i', $style)) {
-                    $newStyle = preg_replace('/background-image\s*:\s*none\s*;?/i', '', $style);
-                    if (trim($newStyle) === '') {
-                        $el->removeAttribute('style');
-                    } else {
-                        $el->setAttribute('style', trim($newStyle));
-                    }
+    private function removeCspHeaders(DOMDocument $dom): void
+    {
+        $xpath = new DOMXPath($dom);
+
+        $metas = $xpath->query('//meta[@http-equiv]');
+        if ($metas !== false) {
+            foreach ($metas as $meta) {
+                $equiv = strtolower($meta->getAttribute('http-equiv'));
+                if (in_array($equiv, ['content-security-policy', 'x-frame-options'])) {
+                    $meta->parentNode->removeChild($meta);
+                }
+            }
+        }
+
+        $referrers = $xpath->query('//meta[@name="referrer"]');
+        if ($referrers !== false) {
+            foreach ($referrers as $meta) {
+                $meta->parentNode->removeChild($meta);
+            }
+        }
+
+        $heads = $xpath->query('//head');
+        if ($heads !== false && $heads->length > 0) {
+            $head = $heads->item(0);
+            $referrerMeta = $dom->createElement('meta');
+            $referrerMeta->setAttribute('name', 'referrer');
+            $referrerMeta->setAttribute('content', 'no-referrer-when-downgrade');
+            $head->insertBefore($referrerMeta, $head->firstChild);
+        }
+
+        $scripts = $xpath->query('//script');
+        if ($scripts !== false) {
+            foreach ($scripts as $script) {
+                $content = $script->textContent ?? '';
+                if (str_contains($content, 'document.referrer') || str_contains($content, 'navigator.sendBeacon')) {
+                    $script->parentNode->removeChild($script);
                 }
             }
         }
     }
 
-    private function localizeFonts(DOMDocument $dom): void
+    private function localizeAllResources(DOMDocument $dom): void
     {
         $xpath = new DOMXPath($dom);
+
+        $this->localizeCssLinks($dom, $xpath);
+        $this->localizeImages($dom, $xpath);
+        $this->localizeFonts($dom, $xpath);
+        $this->localizeInlineStyles($dom, $xpath);
+        $this->localizeStyleBlocks($dom, $xpath);
+        $this->localizeScripts($dom, $xpath);
+        $this->localizeVideoAudio($dom, $xpath);
+    }
+
+    private function localizeCssLinks(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $links = $xpath->query('//link[@rel="stylesheet" and @href]');
+        if ($links === false || $links->length === 0) {
+            return;
+        }
+
+        foreach ($links as $link) {
+            $href = $link->getAttribute('href');
+            if (!preg_match('#^https?://#i', $href)) {
+                continue;
+            }
+
+            $cssContent = $this->httpGet($href, 'text/css,*/*;q=0.1');
+            if ($cssContent === false) {
+                continue;
+            }
+
+            $cssContent = $this->rewriteCssUrls($cssContent, $href);
+
+            $style = $dom->createElement('style');
+            $style->setAttribute('data-localized', 'true');
+            $style->setAttribute('data-original-href', $href);
+            $style->appendChild($dom->createTextNode($cssContent));
+            $link->parentNode->insertBefore($style, $link);
+            $link->parentNode->removeChild($link);
+        }
+    }
+
+    private function rewriteCssUrls(string $css, string $cssUrl): string
+    {
+        $baseUrl = rtrim(preg_replace('#/[^/]*$#', '/', $cssUrl), '/') . '/';
+        $cssOrigin = parse_url($cssUrl, PHP_URL_HOST);
+
+        $css = preg_replace_callback(
+            '/url\(\s*["\']?([^"\')\s]+)["\']?\s*\)/i',
+            function ($matches) use ($baseUrl, $cssOrigin) {
+                $url = trim($matches[1]);
+
+                if (preg_match('#^data:#i', $url)) {
+                    return $matches[0];
+                }
+
+                if (!preg_match('#^https?://#i', $url)) {
+                    if (str_starts_with($url, '//')) {
+                        $url = 'https:' . $url;
+                    } elseif (str_starts_with($url, '/')) {
+                        $url = 'https://' . $cssOrigin . $url;
+                    } else {
+                        $url = $baseUrl . $url;
+                    }
+                }
+
+                $path = parse_url($url, PHP_URL_PATH) ?? $url;
+                $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+                $mediaExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'avif'];
+                $fontExts = ['woff2', 'woff', 'ttf', 'eot', 'otf'];
+
+                if (in_array($ext, $fontExts)) {
+                    $data = $this->httpGet($url);
+                    if ($data !== false) {
+                        $mime = $this->getFontMime($ext);
+                        return "url(data:{$mime};base64," . base64_encode($data) . ")";
+                    }
+                } elseif (in_array($ext, $mediaExts)) {
+                    $data = $this->httpGet($url);
+                    if ($data !== false) {
+                        $mime = $this->getImageMime($ext);
+                        return "url(data:{$mime};base64," . base64_encode($data) . ")";
+                    }
+                }
+
+                return $matches[0];
+            },
+            $css
+        );
+
+        return $css;
+    }
+
+    private function localizeImages(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $images = $xpath->query('//img');
+        if ($images === false) {
+            return;
+        }
+
+        foreach ($images as $img) {
+            foreach (['src', 'data-src', 'data-lazy-src'] as $attr) {
+                $val = $img->getAttribute($attr);
+                if (empty($val) || preg_match('#^data:#i', $val)) {
+                    continue;
+                }
+                $fullUrl = $this->resolveUrl($val);
+                if ($fullUrl !== '') {
+                    $data = $this->httpGet($fullUrl);
+                    if ($data !== false) {
+                        $ext = strtolower(pathinfo(parse_url($fullUrl, PHP_URL_PATH), PATHINFO_EXTENSION));
+                        $mime = $this->getImageMime($ext);
+                        $img->setAttribute($attr, "data:{$mime};base64," . base64_encode($data));
+                    }
+                }
+            }
+
+            $srcset = $img->getAttribute('srcset') ?: $img->getAttribute('data-srcset');
+            if ($srcset !== '') {
+                $newSrcset = $this->localizeSrcset($srcset);
+                $img->setAttribute('srcset', $newSrcset);
+                $img->removeAttribute('data-srcset');
+            }
+        }
+    }
+
+    private function localizeSrcset(string $srcset): string
+    {
+        $parts = array_map('trim', explode(',', $srcset));
+        $result = [];
+
+        foreach ($parts as $part) {
+            $pieces = preg_split('/\s+/', $part);
+            if (count($pieces) >= 1) {
+                $url = $pieces[0];
+                if (!preg_match('#^data:#i', $url) && preg_match('#^https?://#i', $url)) {
+                    $data = $this->httpGet($url);
+                    if ($data !== false) {
+                        $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+                        $mime = $this->getImageMime($ext);
+                        $pieces[0] = "data:{$mime};base64," . base64_encode($data);
+                    }
+                }
+            }
+            $result[] = implode(' ', $pieces);
+        }
+
+        return implode(', ', $result);
+    }
+
+    private function localizeFonts(DOMDocument $dom, DOMXPath $xpath): void
+    {
         $links = $xpath->query('//link[@rel="stylesheet" and @href]');
         if ($links === false || $links->length === 0) {
             return;
@@ -344,15 +528,7 @@ CSS
                     continue;
                 }
                 $encoded = base64_encode($data);
-                $mime = match ($info['ext']) {
-                    'woff2' => 'font/woff2',
-                    'woff' => 'font/woff',
-                    'ttf' => 'font/ttf',
-                    'eot' => 'application/vnd.ms-fontobject',
-                    'otf' => 'font/otf',
-                    'svg' => 'image/svg+xml',
-                    default => 'application/octet-stream',
-                };
+                $mime = $this->getFontMime($info['ext']);
                 $replacement = "url(data:{$mime};base64,{$encoded})";
                 $cssContent = str_replace($original, $replacement, $cssContent);
             }
@@ -363,6 +539,151 @@ CSS
             $block['link']->parentNode->insertBefore($style, $block['link']);
             $block['link']->parentNode->removeChild($block['link']);
         }
+    }
+
+    private function localizeInlineStyles(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $elements = $xpath->query('//*[@style]');
+        if ($elements === false) {
+            return;
+        }
+
+        foreach ($elements as $el) {
+            $style = $el->getAttribute('style');
+            $newStyle = $this->rewriteCssUrls($style, $this->sourceBaseUrl . '/');
+            if ($newStyle !== $style) {
+                $el->setAttribute('style', $newStyle);
+            }
+        }
+    }
+
+    private function localizeStyleBlocks(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $styles = $xpath->query('//style[not(@data-localized) and not(@data-fonts-localized) and not(@data-cloned-fix)]');
+        if ($styles === false) {
+            return;
+        }
+
+        foreach ($styles as $style) {
+            $content = $style->textContent ?? '';
+            if ($content !== '') {
+                $newContent = $this->rewriteCssUrls($content, $this->sourceBaseUrl . '/');
+                if ($newContent !== $content) {
+                    $style->textContent = $newContent;
+                }
+            }
+        }
+    }
+
+    private function localizeScripts(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $scripts = $xpath->query('//script[@src]');
+        if ($scripts === false) {
+            return;
+        }
+
+        foreach ($scripts as $script) {
+            $src = $script->getAttribute('src');
+            if (empty($src) || preg_match('#^data:#i', $src)) {
+                continue;
+            }
+            $fullUrl = $this->resolveUrl($src);
+            if ($fullUrl !== '') {
+                $data = $this->httpGet($fullUrl, '*/*', 'application/javascript');
+                if ($data !== false) {
+                    $script->removeAttribute('src');
+                    $script->textContent = $data;
+                }
+            }
+        }
+    }
+
+    private function localizeVideoAudio(DOMDocument $dom, DOMXPath $xpath): void
+    {
+        $mediaEls = $xpath->query('//video | //audio | //source');
+        if ($mediaEls === false) {
+            return;
+        }
+
+        foreach ($mediaEls as $el) {
+            foreach (['src', 'poster', 'data-src', 'data-lazy-src', 'data-poster'] as $attr) {
+                $val = $el->getAttribute($attr);
+                if (empty($val) || preg_match('#^data:#i', $val)) {
+                    continue;
+                }
+                $fullUrl = $this->resolveUrl($val);
+                if ($fullUrl !== '') {
+                    $data = $this->httpGet($fullUrl);
+                    if ($data !== false) {
+                        $ext = strtolower(pathinfo(parse_url($fullUrl, PHP_URL_PATH), PATHINFO_EXTENSION));
+                        $mime = $this->getMediaMime($ext);
+                        $el->setAttribute($attr, "data:{$mime};base64," . base64_encode($data));
+                    }
+                }
+            }
+        }
+    }
+
+    private function resolveUrl(string $url): string
+    {
+        if (preg_match('#^https?://#i', $url)) {
+            return $url;
+        }
+
+        if (str_starts_with($url, '//')) {
+            return 'https:' . $url;
+        }
+
+        if ($this->sourceOrigin !== '') {
+            if (str_starts_with($url, '/')) {
+                return 'https://' . $this->sourceOrigin . $url;
+            }
+            return $this->sourceBaseUrl . '/' . $url;
+        }
+
+        return '';
+    }
+
+    private function getFontMime(string $ext): string
+    {
+        return match ($ext) {
+            'woff2' => 'font/woff2',
+            'woff' => 'font/woff',
+            'ttf' => 'font/ttf',
+            'eot' => 'application/vnd.ms-fontobject',
+            'otf' => 'font/otf',
+            'svg' => 'image/svg+xml',
+            default => 'application/octet-stream',
+        };
+    }
+
+    private function getImageMime(string $ext): string
+    {
+        return match ($ext) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            'webp' => 'image/webp',
+            'ico' => 'image/x-icon',
+            'avif' => 'image/avif',
+            default => 'application/octet-stream',
+        };
+    }
+
+    private function getMediaMime(string $ext): string
+    {
+        return match ($ext) {
+            'mp4' => 'video/mp4',
+            'webm' => 'video/webm',
+            'ogg' => 'video/ogg',
+            'mp3' => 'audio/mpeg',
+            'wav' => 'audio/wav',
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            default => 'application/octet-stream',
+        };
     }
 
     private function httpGetMulti(array $urlMap): array
@@ -409,24 +730,41 @@ CSS
         return $results;
     }
 
-    private function httpGet(string $url, string $accept = '*/*'): string|false
+    private function httpGet(string $url, string $accept = '*/*', string $expectedType = ''): string|false
     {
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT => 10,
+            CURLOPT_TIMEOUT => 15,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win6; x64) AppleWebKit/537.36',
             CURLOPT_HTTPHEADER => [
                 "Accept: {$accept}",
+                'Accept-Encoding: identity',
             ],
         ]);
         $data = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        return ($data !== false && $code < 400) ? $data : false;
+        return ($data !== false && $code < 400 && strlen($data) > 0) ? $data : false;
+    }
+
+    private function extractOrigin(string $html): string
+    {
+        if (preg_match('#https?://([a-zA-Z0-9.-]+)#', $html, $m)) {
+            return $m[1];
+        }
+        return '';
+    }
+
+    private function extractBaseUrl(string $html): string
+    {
+        if (preg_match('#(https?://[a-zA-Z0-9.-]+)#', $html, $m)) {
+            return $m[1];
+        }
+        return '';
     }
 
     private function extractSourceDomain(string $html): string
@@ -447,7 +785,7 @@ CSS
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
             return [
                 'success' => false,
-                'error' => 'URL inválida',
+                'error' => 'URL invalida',
             ];
         }
 
@@ -459,7 +797,7 @@ CSS
             CURLOPT_MAXREDIRS => 5,
             CURLOPT_TIMEOUT => 30,
             CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win6; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_ENCODING => '',
