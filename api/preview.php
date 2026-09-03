@@ -42,16 +42,39 @@ if (!empty($sourceDomain)) {
   var proxyBase = '/proxy.php?url=';
   var sourceDomain = '{$sourceDomain}';
 
+  var blockedDomains = [
+    'google-analytics.com', 'googletagmanager.com', 'google.com', 'googleapis.com',
+    'facebook.net', 'facebook.com', 'doubleclick.net',
+    'taboola.com', 'outbrain.com', 'hotjar.com',
+    'cloudflareinsights.com', 'youtube.com',
+    'googlesyndication.com', 'googleadservices.com'
+  ];
+
+  function shouldProxy(url) {
+    try {
+      var parsed = new URL(url, window.location.href);
+      var host = parsed.hostname;
+      if (host === sourceDomain || host.endsWith('.' + sourceDomain)) {
+        return true;
+      }
+      for (var i = 0; i < blockedDomains.length; i++) {
+        if (host === blockedDomains[i] || host.endsWith('.' + blockedDomains[i])) {
+          return false;
+        }
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function proxyUrl(url) {
-    if (!url || url.indexOf('data:') === 0 || url.indexOf('/') === 0 || url.indexOf(proxyBase) === 0) {
-      return url;
-    }
-    if (url.indexOf('//') === 0) {
-      url = 'https:' + url;
-    }
-    if (url.indexOf('http') !== 0) {
-      return url;
-    }
+    if (!url) return url;
+    if (url.indexOf('data:') === 0) return url;
+    if (url.indexOf(proxyBase) === 0) return url;
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    if (url.indexOf('http') !== 0) return url;
+    if (!shouldProxy(url)) return url;
     return proxyBase + encodeURIComponent(url);
   }
 
@@ -72,41 +95,6 @@ if (!empty($sourceDomain)) {
     }
     return origOpen.apply(this, args);
   };
-
-  var style = document.createElement('style');
-  style.textContent = '@font-face { font-family: proxied; }';
-  document.head.appendChild(style);
-
-  var observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(mutation) {
-      mutation.addedNodes.forEach(function(node) {
-        if (node.nodeType === 1) {
-          if (node.tagName === 'LINK' && node.rel && node.rel.indexOf('stylesheet') !== -1) {
-            var href = node.getAttribute('href');
-            if (href && href.indexOf(proxyBase) === -1) {
-              node.setAttribute('href', proxyUrl(href));
-            }
-          }
-          if (node.tagName === 'SCRIPT' && node.src) {
-            if (node.src.indexOf(proxyBase) === -1) {
-              node.src = proxyUrl(node.src);
-            }
-          }
-          if (node.tagName === 'IMG' && node.src) {
-            if (node.src.indexOf(proxyBase) === -1) {
-              node.src = proxyUrl(node.src);
-            }
-          }
-          if (node.tagName === 'SOURCE' && node.src) {
-            if (node.src.indexOf(proxyBase) === -1) {
-              node.src = proxyUrl(node.src);
-            }
-          }
-        }
-      });
-    });
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
 
   var origCreateElement = document.createElement.bind(document);
   document.createElement = function(tag) {
@@ -130,6 +118,33 @@ if (!empty($sourceDomain)) {
     }
     return el;
   };
+
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      mutation.addedNodes.forEach(function(node) {
+        if (node.nodeType !== 1) return;
+        if (node.tagName === 'LINK' && node.rel && node.rel.indexOf('stylesheet') !== -1) {
+          var href = node.getAttribute('href');
+          if (href && href.indexOf(proxyBase) === -1) {
+            node.setAttribute('href', proxyUrl(href));
+          }
+        }
+        if (node.tagName === 'SCRIPT' && node.src) {
+          if (node.src.indexOf(proxyBase) === -1) {
+            var proxied = proxyUrl(node.src);
+            if (proxied !== node.src) node.src = proxied;
+          }
+        }
+        if (node.tagName === 'IMG' && node.src) {
+          if (node.src.indexOf(proxyBase) === -1) {
+            var proxied = proxyUrl(node.src);
+            if (proxied !== node.src) node.src = proxied;
+          }
+        }
+      });
+    });
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>
 HTML;

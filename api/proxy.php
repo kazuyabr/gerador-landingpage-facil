@@ -9,12 +9,10 @@ if (empty($url) || !preg_match('#^https?://#i', $url)) {
     die('URL invalida');
 }
 
-$allowedExtensions = ['woff', 'woff2', 'ttf', 'eot', 'otf', 'css', 'js', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico'];
-$ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
-
-if (!in_array($ext, $allowedExtensions)) {
+$host = parse_url($url, PHP_URL_HOST);
+if (empty($host)) {
     http_response_code(400);
-    die('Tipo de arquivo nao permitido');
+    die('Host invalido');
 }
 
 $ch = curl_init();
@@ -39,6 +37,8 @@ if ($content === false || $httpCode >= 400) {
     http_response_code(502);
     die('Erro ao buscar recurso');
 }
+
+$ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
 
 $mimeTypes = [
     'woff' => 'font/woff',
