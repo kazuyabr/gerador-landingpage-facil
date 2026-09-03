@@ -34,10 +34,14 @@ if (preg_match('#https?://([a-zA-Z0-9.-]+)#', $html, $m)) {
     $sourceDomain = $m[1];
 }
 
-// CDN pública do Font Awesome
-$fontAwesomeCDN = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">';
+// Remover links CSS originais do Font Awesome (apontam para dominio original = CORS)
+$html = preg_replace('#<link[^>]+href=["\'][^"\']*font-awesome[^"\']*["\'][^>]*/?>#i', '', $html);
+$html = preg_replace('#<link[^>]+href=["\'][^"\']*fontawesome[^"\']*["\'][^>]*/?>#i', '', $html);
+$html = preg_replace('#<link[^>]+href=["\'][^"\']*\/all\.min\.css[^"\']*["\'][^>]*/?>#i', '', $html);
+$html = preg_replace('#<link[^>]+href=["\'][^"\']*\/font-awesome[^"\']*["\'][^>]*/?>#i', '', $html);
 
-// Google Fonts CDN
+// CDN publica do Font Awesome
+$fontAwesomeCDN = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">';
 $googleFontsCDN = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>';
 
 $html = preg_replace('/<head([^>]*)>/i', "<head\$1>\n{$fontAwesomeCDN}\n{$googleFontsCDN}", $html, 1);
