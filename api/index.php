@@ -30,6 +30,7 @@ if ($jobId && preg_match('/^[a-f0-9]{16}$/', $jobId)) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gerador de Landing Page para Afiliados</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>

@@ -302,7 +302,9 @@ kbd {
 }
 
 .ctas-list summary::before {
-  content: 'ÔûÂ';
+  content: '\f054';
+  font-family: 'Font Awesome 6 Free';
+  font-weight: 900;
   display: inline-block;
   margin-right: 8px;
   font-size: 11px;
