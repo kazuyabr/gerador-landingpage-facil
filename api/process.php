@@ -2,11 +2,16 @@
 
 require_once __DIR__ . '/../lib/Config.php';
 require_once Config::getLibDir() . '/Cloner.php';
-require_once Config::getLibDir() . '/MediaDownloader.php';
 require_once Config::getLibDir() . '/ZipBuilder.php';
 
+$isAjax = isset($_POST['ajax']) && $_POST['ajax'] === '1';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
+    if ($isAjax) {
+        echo 'index.php';
+    } else {
+        header('Location: index.php');
+    }
     exit;
 }
 
@@ -15,14 +20,18 @@ $sourceUrl = trim($_POST['source_url'] ?? '');
 $sourceHtml = trim($_POST['source_html'] ?? '');
 
 if ($affiliateLink === '') {
-    header('Location: index.php?error=' . urlencode('O link do afiliado é obrigatório.'));
+    $error = urlencode('O link do afiliado e obrigatorio.');
+    if ($isAjax) { echo "index.php?error={$error}"; exit; }
+    header('Location: index.php?error=' . $error);
     exit;
 }
 
 if (!filter_var($affiliateLink, FILTER_VALIDATE_URL)) {
     $affiliateLink = 'https://' . $affiliateLink;
     if (!filter_var($affiliateLink, FILTER_VALIDATE_URL)) {
-        header('Location: index.php?error=' . urlencode('Link do afiliado inválido. Use o formato https://...'));
+        $error = urlencode('Link do afiliado invalido. Use o formato https://...');
+        if ($isAjax) { echo "index.php?error={$error}"; exit; }
+        header('Location: index.php?error=' . $error);
         exit;
     }
 }
@@ -39,17 +48,23 @@ if ($sourceHtml !== '') {
     $fetchResult = $cloner->fetchUrl($sourceUrl);
 
     if (!$fetchResult['success']) {
-        header('Location: index.php?error=' . urlencode('Não foi possível buscar a URL. Erro: ' . $fetchResult['error'] . '. Tente colar o HTML manualmente.'));
+        $error = urlencode('Nao foi possivel buscar a URL. Erro: ' . $fetchResult['error'] . '. Tente colar o HTML manualmente.');
+        if ($isAjax) { echo "index.php?error={$error}"; exit; }
+        header('Location: index.php?error=' . $error);
         exit;
     }
     $html = $fetchResult['html'];
 } else {
-    header('Location: index.php?error=' . urlencode('Forneça uma URL ou cole o HTML da landing page.'));
+    $error = urlencode('Forneça uma URL ou cole o HTML da landing page.');
+    if ($isAjax) { echo "index.php?error={$error}"; exit; }
+    header('Location: index.php?error=' . $error);
     exit;
 }
 
 if (strlen($html) < 200) {
-    header('Location: index.php?error=' . urlencode('O HTML parece estar vazio ou muito pequeno. Cole o código-fonte completo da página.'));
+    $error = urlencode('O HTML parece estar vazio ou muito pequeno. Cole o codigo-fonte completo da pagina.');
+    if ($isAjax) { echo "index.php?error={$error}"; exit; }
+    header('Location: index.php?error=' . $error);
     exit;
 }
 
@@ -76,5 +91,10 @@ $jobData = [
 
 file_put_contents($jobFile, json_encode($jobData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
 
-header('Location: index.php?job=' . $jobId);
+$redirectUrl = 'index.php?job=' . $jobId;
+if ($isAjax) {
+    echo $redirectUrl;
+} else {
+    header('Location: ' . $redirectUrl);
+}
 exit;

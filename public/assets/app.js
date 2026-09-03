@@ -1,20 +1,20 @@
 (function () {
   'use strict';
 
-  const form = document.getElementById('cloneForm');
+  var form = document.getElementById('cloneForm');
   if (!form) return;
 
-  const sourceUrl = document.getElementById('source_url');
-  const sourceHtml = document.getElementById('source_html');
-  const affiliateLink = document.getElementById('affiliate_link');
-  const submitBtn = document.getElementById('submitBtn');
-  const loadingOverlay = document.getElementById('loadingOverlay');
-  const loadingStep = document.getElementById('loadingStep');
-  const loadingTime = document.getElementById('loadingTime');
+  var sourceUrl = document.getElementById('source_url');
+  var sourceHtml = document.getElementById('source_html');
+  var affiliateLink = document.getElementById('affiliate_link');
+  var submitBtn = document.getElementById('submitBtn');
+  var loadingOverlay = document.getElementById('loadingOverlay');
+  var loadingStep = document.getElementById('loadingStep');
+  var loadingTime = document.getElementById('loadingTime');
 
   function updateRequiredStates() {
-    const hasUrl = sourceUrl.value.trim() !== '';
-    const hasHtml = sourceHtml.value.trim() !== '';
+    var hasUrl = sourceUrl.value.trim() !== '';
+    var hasHtml = sourceHtml.value.trim() !== '';
 
     if (hasUrl) {
       sourceHtml.removeAttribute('required');
@@ -23,8 +23,6 @@
     }
 
     if (hasHtml) {
-      sourceUrl.removeAttribute('required');
-    } else {
       sourceUrl.removeAttribute('required');
     }
   }
@@ -62,28 +60,27 @@
     }
   }
 
-  let loadingInterval = null;
-  let startTime = 0;
+  var loadingInterval = null;
+  var startTime = 0;
 
   function startLoadingTimer() {
     startTime = Date.now();
-    const steps = [
+    var steps = [
       { text: 'Enviando dados...', time: 0 },
       { text: 'Buscando HTML da pagina...', time: 2 },
       { text: 'Analisando e substituindo CTAs...', time: 5 },
       { text: 'Baixando recursos externos...', time: 8 },
-      { text: 'Finalizando...', time: 12 },
+      { text: 'Finalizando...', time: 12 }
     ];
-    let stepIdx = 0;
+    var stepIdx = 0;
 
     loadingInterval = setInterval(function () {
       var elapsed = Math.floor((Date.now() - startTime) / 1000);
-      updateLoadingStep(steps[stepIdx].text, elapsed);
 
       while (stepIdx < steps.length - 1 && elapsed >= steps[stepIdx + 1].time) {
         stepIdx++;
-        updateLoadingStep(steps[stepIdx].text, elapsed);
       }
+      updateLoadingStep(steps[stepIdx].text, elapsed);
     }, 200);
   }
 
@@ -95,17 +92,17 @@
   }
 
   form.addEventListener('submit', function (e) {
+    e.preventDefault();
+
     var url = sourceUrl.value.trim();
     var html = sourceHtml.value.trim();
 
     if (!url && !html) {
-      e.preventDefault();
       alert('Preencha a URL OU cole o HTML da landing page.');
       return;
     }
 
     if (!affiliateLink.value.trim()) {
-      e.preventDefault();
       alert('O link do afiliado e obrigatorio.');
       affiliateLink.focus();
       return;
@@ -115,6 +112,45 @@
     submitBtn.textContent = 'Processando...';
     showLoading();
     startLoadingTimer();
+
+    var formData = new FormData(form);
+    formData.append('ajax', '1');
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'process.php', true);
+
+    xhr.onload = function () {
+      stopLoadingTimer();
+      if (xhr.status === 200) {
+        var response = xhr.responseText;
+        if (response.indexOf('index.php?job=') !== -1) {
+          window.location.href = response.trim();
+        } else {
+          hideLoading();
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Clonar Landing Page';
+          if (response.indexOf('error=') !== -1) {
+            var errorMsg = decodeURIComponent(response.split('error=')[1].split('&')[0]);
+            alert('Erro: ' + errorMsg);
+          }
+        }
+      } else {
+        hideLoading();
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Clonar Landing Page';
+        alert('Erro ao processar. Tente novamente.');
+      }
+    };
+
+    xhr.onerror = function () {
+      stopLoadingTimer();
+      hideLoading();
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Clonar Landing Page';
+      alert('Erro de conexao. Verifique sua internet.');
+    };
+
+    xhr.send(formData);
   });
 
   var htmlField = document.getElementById('source_html');
@@ -148,13 +184,4 @@
       reader.readAsText(file);
     });
   }
-
-  window.stopLoading = function () {
-    stopLoadingTimer();
-    hideLoading();
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Clonar Landing Page';
-    }
-  };
 })();
