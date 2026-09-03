@@ -9,12 +9,6 @@ if (empty($url) || !preg_match('#^https?://#i', $url)) {
     die('URL invalida');
 }
 
-$host = parse_url($url, PHP_URL_HOST);
-if (empty($host)) {
-    http_response_code(400);
-    die('Host invalido');
-}
-
 $ch = curl_init();
 curl_setopt_array($ch, [
     CURLOPT_URL => $url,
@@ -39,6 +33,23 @@ if ($content === false || $httpCode >= 400) {
 }
 
 $ext = strtolower(pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+
+if ($ext === 'css' || ($contentType && strpos($contentType, 'text/css') !== false)) {
+    $cssDir = rtrim(parse_url($url, PHP_URL_PATH), '/');
+    $cssDir = substr($cssDir, 0, strrpos($cssDir, '/'));
+    $baseUrl = parse_url($url, PHP_URL_SCHEME) . '://' . parse_url($url, PHP_URL_HOST) . $cssDir . '/';
+
+    $content = preg_replace_callback('/url\(\s*[\'"]?([^\'")]+)[\'"]?\s*\)/i', function($m) use ($baseUrl) {
+        $resourceUrl = $m[1];
+        if (strpos($resourceUrl, 'data:') === 0) return $m[0];
+        if (strpos($resourceUrl, '//') === 0) $resourceUrl = 'https:' . $resourceUrl;
+        if (strpos($resourceUrl, 'http') !== 0) $resourceUrl = rtrim($baseUrl, '/') . '/' . ltrim($resourceUrl, '/');
+        $proxied = '/proxy.php?url=' . urlencode($resourceUrl);
+        return 'url("' . $proxied . '")';
+    }, $content);
+
+    $contentType = 'text/css';
+}
 
 $mimeTypes = [
     'woff' => 'font/woff',
