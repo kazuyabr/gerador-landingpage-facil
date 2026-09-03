@@ -34,6 +34,14 @@ if (preg_match('#https?://([a-zA-Z0-9.-]+)#', $html, $m)) {
     $sourceDomain = $m[1];
 }
 
+// CDN pública do Font Awesome
+$fontAwesomeCDN = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">';
+
+// Google Fonts CDN
+$googleFontsCDN = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>';
+
+$html = preg_replace('/<head([^>]*)>/i', "<head\$1>\n{$fontAwesomeCDN}\n{$googleFontsCDN}", $html, 1);
+
 $proxyScript = '';
 if (!empty($sourceDomain)) {
     $proxyScript = <<<HTML
@@ -45,6 +53,7 @@ if (!empty($sourceDomain)) {
   var blockedDomains = [
     'google-analytics.com', 'googletagmanager.com', 'google.com', 'googleapis.com',
     'facebook.net', 'facebook.com', 'doubleclick.net',
+    'cdnjs.cloudflare.com',
     'taboola.com', 'outbrain.com', 'hotjar.com',
     'cloudflareinsights.com', 'youtube.com',
     'googlesyndication.com', 'googleadservices.com'
