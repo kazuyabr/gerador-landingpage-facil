@@ -1,0 +1,16 @@
+RewriteEngine On
+
+# Serve assets directly
+RewriteRule ^assets/(.+)$ assets/$1 [L]
+
+# Route clean URLs to PHP files
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^/?$ index.php [L]
+RewriteRule ^/?process/?$ process.php [L]
+RewriteRule ^/?download/?$ download.php [L]
+RewriteRule ^/?preview/?$ preview.php [L]
+RewriteRule ^/?proxy/?$ proxy.php [L]
+
+# Prevent directory listing
+Options -Indexes
