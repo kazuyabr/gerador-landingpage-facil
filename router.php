@@ -44,6 +44,8 @@ $routes = [
     '/download.php' => 'api/download.php',
     '/preview' => 'api/preview.php',
     '/preview.php' => 'api/preview.php',
+    '/proxy' => 'api/proxy.php',
+    '/proxy.php' => 'api/proxy.php',
 ];
 
 if (isset($routes[$uri]) || isset($routes[$uriClean])) {
