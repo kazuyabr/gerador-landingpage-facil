@@ -156,8 +156,32 @@ class Cloner
 
     private function extractDomain(string $html): string
     {
-        if (preg_match('#https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})#', $html, $m)) {
-            return $m[1];
+        $skipDomains = [
+            'ogp.me', 'schema.org', 'w3.org', 'xmlns.com',
+            'google.com', 'googleapis.com', 'googletagmanager.com',
+            'facebook.com', 'facebook.net', 'twitter.com',
+            'cdnjs.cloudflare.com', 'cloudflare.com',
+        ];
+
+        if (preg_match_all('#https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})#', $html, $matches)) {
+            $counts = [];
+            foreach ($matches[1] as $host) {
+                $host = strtolower($host);
+                $skip = false;
+                foreach ($skipDomains as $sd) {
+                    if ($host === $sd || substr($host, -(strlen($sd) + 1)) === '.' . $sd) {
+                        $skip = true;
+                        break;
+                    }
+                }
+                if (!$skip) {
+                    $counts[$host] = ($counts[$host] ?? 0) + 1;
+                }
+            }
+            if (!empty($counts)) {
+                arsort($counts);
+                return array_key_first($counts);
+            }
         }
         return '';
     }
