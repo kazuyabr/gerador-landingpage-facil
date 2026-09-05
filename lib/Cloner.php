@@ -43,7 +43,7 @@ class Cloner
 
     private array $lastCtas = [];
 
-    private function detectAndReplaceCtas(string $html, string $affiliateLink): array
+    private function detectAndReplaceCtas(string $html, string $affiliateLink): string
     {
         $ctas = [];
 
