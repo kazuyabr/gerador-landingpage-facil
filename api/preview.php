@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../lib/Config.php';
+require_once __DIR__ . '/../lib/AssetProcessor.php';
 
 $jobId = $_GET['job'] ?? '';
 
@@ -34,17 +35,14 @@ if (preg_match('#https?://([a-zA-Z0-9.-]+)#', $html, $m)) {
     $sourceDomain = $m[1];
 }
 
-// Remover links CSS originais do Font Awesome (apontam para dominio original = CORS)
 $html = preg_replace('#<link[^>]+href=["\'][^"\']*font-awesome[^"\']*["\'][^>]*/?>#i', '', $html);
 $html = preg_replace('#<link[^>]+href=["\'][^"\']*fontawesome[^"\']*["\'][^>]*/?>#i', '', $html);
 $html = preg_replace('#<link[^>]+href=["\'][^"\']*\/all\.min\.css[^"\']*["\'][^>]*/?>#i', '', $html);
-$html = preg_replace('#<link[^>]+href=["\'][^"\']*\/font-awesome[^"\']*["\'][^>]*/?>#i', '', $html);
 
-// CDN publica do Font Awesome
 $fontAwesomeCDN = '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">';
 $googleFontsCDN = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>';
 
-$html = preg_replace('/<head([^>]*)>/i', "<head\$1>\n{$fontAwesomeCDN}\n{$googleFontsCDN}", $html, 1);
+$html = preg_replace('/<\/head>/i', "{$fontAwesomeCDN}\n{$googleFontsCDN}\n</head>", $html, 1);
 
 $proxyScript = '';
 if (!empty($sourceDomain)) {
@@ -107,29 +105,6 @@ if (!empty($sourceDomain)) {
       args[1] = proxyUrl(args[1]);
     }
     return origOpen.apply(this, args);
-  };
-
-  var origCreateElement = document.createElement.bind(document);
-  document.createElement = function(tag) {
-    var el = origCreateElement(tag);
-    if (tag.toLowerCase() === 'style') {
-      var origText = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'textContent');
-      if (origText && origText.set) {
-        Object.defineProperty(el.style, 'textContent', {
-          set: function(value) {
-            var regex = /url\\s*\\(\\s*['"]?([^'")]+)['"]?\\s*\\)/gi;
-            var proxied = value.replace(regex, function(match, url) {
-              return 'url(' + proxyUrl(url) + ')';
-            });
-            origText.set.call(el.style, proxied);
-          },
-          get: function() {
-            return origText.get.call(el.style);
-          }
-        });
-      }
-    }
-    return el;
   };
 
   var observer = new MutationObserver(function(mutations) {

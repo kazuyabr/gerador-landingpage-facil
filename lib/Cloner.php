@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/AssetProcessor.php';
+
 class Cloner
 {
     private array $checkoutDomains = [
@@ -10,94 +12,107 @@ class Cloner
 
     private array $ctaClasses = [
         'elementor-button', 'cta', 'btn-primary', 'btn-cta', 'buy-button', 'checkout-btn',
+        'ct-link-text', 'pulse-button', 'oxy-pro-menu',
     ];
 
     public function process(string $html, string $affiliateLink, string $mode = 'paste'): array
     {
         $originalSize = strlen($html);
 
-        $hasDoctype = stripos($html, '<!doctype') !== false || stripos($html, '<!DOCTYPE') !== false;
-        $dom = new DOMDocument();
-        libxml_use_internal_errors(true);
-        $loadSource = $hasDoctype ? $html : '<?xml encoding="UTF-8">' . $html;
-        $dom->loadHTML($loadSource, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
-        libxml_clear_errors();
+        $sourceDomain = $this->extractDomain($html);
+        if (!empty($sourceDomain)) {
+            $processor = new AssetProcessor($sourceDomain);
+            $html = $processor->processHtml($html);
+        }
 
-        $xpath = new DOMXPath($dom);
-        $ctasFound = $this->detectAndReplace($xpath, $affiliateLink);
+        $html = $this->detectAndReplaceCtas($html, $affiliateLink);
 
-        $processedHtml = $dom->saveHTML();
-        $processedHtml = preg_replace('/^<\?xml[^>]*\?>\s*/i', '', $processedHtml);
-        $processedHtml = preg_replace('/^<!doctype[^>]*>/i', '<!DOCTYPE html>', $processedHtml);
-        $processedHtml = preg_replace('/[\x{FEFF}]/u', '', $processedHtml);
+        $html = preg_replace('/[\x{FEFF}]/u', '', $html);
 
         return [
-            'html' => $processedHtml,
+            'html' => $html,
             'original_size' => $originalSize,
-            'processed_size' => strlen($processedHtml),
-            'ctas' => $ctasFound,
+            'processed_size' => strlen($html),
+            'ctas' => $this->lastCtas,
             'mode' => $mode,
             'affiliate_link' => $affiliateLink,
+            'source_domain' => $sourceDomain,
             'created_at' => date('Y-m-d H:i:s'),
         ];
     }
 
-    private function detectAndReplace(DOMXPath $xpath, string $affiliateLink): array
+    private array $lastCtas = [];
+
+    private function detectAndReplaceCtas(string $html, string $affiliateLink): array
     {
         $ctas = [];
-        $processedNodes = [];
 
-        $allAnchors = $xpath->query('//a[@href]');
-        if ($allAnchors === false) return $ctas;
+        $html = preg_replace_callback('/<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/is', function($m) use ($affiliateLink, &$ctas) {
+            $href = $m[1];
+            $content = $m[2];
+            $fullTag = $m[0];
 
-        foreach ($allAnchors as $node) {
-            $href = $node->getAttribute('href');
-            $text = trim(preg_replace('/\s+/', ' ', $node->textContent));
+            if (empty($href) || str_starts_with($href, 'javascript:') || str_starts_with($href, 'mailto:') || str_starts_with($href, 'tel:') || str_starts_with($href, '#')) {
+                return $fullTag;
+            }
 
-            if (empty($href) || str_starts_with($href, 'javascript:') || str_starts_with($href, 'mailto:') || str_starts_with($href, 'tel:')) continue;
+            $isCheckout = $this->isCheckoutLink($href);
+            $isCta = $this->looksLikeCta($fullTag, $content);
 
-            $isExternalCheckout = $this->isCheckoutLink($href);
-            $isCtaStyle = $this->looksLikeCta($node);
-            $isAnchorOnly = str_starts_with($href, '#');
+            if (!$isCheckout && !$isCta) {
+                return $fullTag;
+            }
 
-            if (!$isExternalCheckout && !$isCtaStyle) continue;
-            if ($isAnchorOnly && !$isCtaStyle) continue;
-
-            $nodeId = spl_object_id($node);
-            if (in_array($nodeId, $processedNodes, true)) continue;
-
+            $text = trim(strip_tags($content));
             $ctas[] = [
                 'old_href' => $href,
                 'new_href' => $affiliateLink,
-                'text' => $text !== '' ? $text : '(sem texto)',
-                'class' => $node->getAttribute('class'),
-                'type' => $this->isCheckoutLink($href) ? 'checkout' : 'button',
+                'text' => !empty($text) ? $text : '(sem texto)',
+                'class' => $this->extractClass($fullTag),
+                'type' => $isCheckout ? 'checkout' : 'button',
             ];
 
-            $node->setAttribute('href', $affiliateLink);
-            $node->setAttribute('data-cloned-cta', 'true');
-            $node->setAttribute('data-original-href', $href);
-            $processedNodes[] = $nodeId;
-        }
+            $newTag = str_replace(
+                'href="' . htmlspecialchars($href) . '"',
+                'href="' . htmlspecialchars($affiliateLink) . '"',
+                $fullTag
+            );
+            $newTag = str_replace(
+                "href='" . htmlspecialchars($href) . "'",
+                "href='" . htmlspecialchars($affiliateLink) . "'",
+                $newTag
+            );
 
-        $allButtons = $xpath->query('//button');
-        if ($allButtons !== false) {
-            foreach ($allButtons as $node) {
-                if (!$this->looksLikeCta($node)) continue;
-                $text = trim(preg_replace('/\s+/', ' ', $node->textContent));
-                $ctas[] = [
-                    'old_href' => '(button)',
-                    'new_href' => $affiliateLink,
-                    'text' => $text !== '' ? $text : '(sem texto)',
-                    'class' => $node->getAttribute('class'),
-                    'type' => 'button-no-href',
-                ];
-                $node->setAttribute('onclick', "window.location.href='" . addslashes($affiliateLink) . "'");
-                $node->setAttribute('data-cloned-cta', 'true');
+            $newTag = str_replace('<a ', '<a data-cloned-cta="true" data-original-href="' . htmlspecialchars($href) . '" ', $newTag);
+
+            return $newTag;
+        }, $html);
+
+        $html = preg_replace_callback('/<button[^>]*>(.*?)<\/button>/is', function($m) use ($affiliateLink, &$ctas) {
+            $content = $m[1];
+            $fullTag = $m[0];
+
+            if (!$this->looksLikeCta($fullTag, $content)) {
+                return $fullTag;
             }
-        }
 
-        return $ctas;
+            $text = trim(strip_tags($content));
+            $ctas[] = [
+                'old_href' => '(button)',
+                'new_href' => $affiliateLink,
+                'text' => !empty($text) ? $text : '(sem texto)',
+                'class' => $this->extractClass($fullTag),
+                'type' => 'button-no-href',
+            ];
+
+            $onclick = "window.location.href='" . addslashes($affiliateLink) . "'";
+            $newTag = str_replace('<button', '<button data-cloned-cta="true" onclick="' . $onclick . '"', $fullTag);
+
+            return $newTag;
+        }, $html);
+
+        $this->lastCtas = $ctas;
+        return $html;
     }
 
     private function isCheckoutLink(string $href): bool
@@ -109,19 +124,42 @@ class Cloner
         return false;
     }
 
-    private function looksLikeCta(DOMNode $node): bool
+    private function looksLikeCta(string $tag, string $content): bool
     {
-        $class = strtolower($node->getAttribute('class') ?? '');
+        $class = strtolower($this->extractClass($tag));
         foreach ($this->ctaClasses as $ctaClass) {
             if (str_contains($class, $ctaClass)) return true;
         }
 
-        $ctaKeywords = ['comprar', 'quero', 'adquirir', 'garantir', 'entrar', 'iniciar', 'começar', 'acesso', 'aproveitar', 'resgatar', 'buy', 'get', 'start', 'join', 'access', 'claim'];
-        $text = strtolower(trim($node->textContent));
+        $ctaKeywords = [
+            'comprar', 'quero', 'adquirir', 'garantir', 'entrar', 'iniciar',
+            'começar', 'acesso', 'aproveitar', 'resgatar', 'inscrever',
+            'buy', 'get', 'start', 'join', 'access', 'claim', 'enroll',
+            'garantir vaga', 'garantir minha vaga', 'quero acesso',
+        ];
+
+        $text = strtolower(strip_tags($content));
         foreach ($ctaKeywords as $kw) {
             if (str_contains($text, $kw)) return true;
         }
+
         return false;
+    }
+
+    private function extractClass(string $tag): string
+    {
+        if (preg_match('/class=["\']([^"\']+)["\']/i', $tag, $m)) {
+            return $m[1];
+        }
+        return '';
+    }
+
+    private function extractDomain(string $html): string
+    {
+        if (preg_match('#https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})#', $html, $m)) {
+            return $m[1];
+        }
+        return '';
     }
 
     public function fetchUrl(string $url): array
