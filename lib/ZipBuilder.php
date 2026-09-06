@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/AssetProcessor.php';
+
 class ZipBuilder
 {
     public function buildHtmlZip(string $html, string $jobId, array $metadata = []): string
@@ -18,8 +20,23 @@ class ZipBuilder
             mkdir($assetsDir, 0777, true);
         }
 
+        $sourceDomain = $metadata['source_domain'] ?? '';
+        if (empty($sourceDomain) && preg_match('#https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})#', $html, $m)) {
+            $sourceDomain = $m[1];
+        }
+
+        if (!empty($sourceDomain)) {
+            $processor = new AssetProcessor($sourceDomain);
+            $html = $processor->processForZip($html, $assetsDir);
+        }
+
         $html = $this->extractDataUris($html, $assetsDir);
         $html = $this->extractInlineCss($html, $assetsDir);
+
+        if (!empty($sourceDomain)) {
+            $processor = new AssetProcessor($sourceDomain);
+            $html = $processor->rewriteRemainingUrls($html, $assetsDir);
+        }
 
         $htmlPath = $tmpDir . DIRECTORY_SEPARATOR . 'index.html';
         file_put_contents($htmlPath, $html);

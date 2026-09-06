@@ -26,6 +26,130 @@ class AssetProcessor
         return $html;
     }
 
+    public function processForZip(string $html, string $assetsDir): string
+    {
+        if (!is_dir($assetsDir)) {
+            mkdir($assetsDir, 0777, true);
+        }
+
+        $html = $this->processHtml($html);
+        $html = $this->downloadRemainingAssets($html, $assetsDir);
+        return $html;
+    }
+
+    private function downloadRemainingAssets(string $html, string $assetsDir): string
+    {
+        $allUrls = [];
+
+        preg_match_all('/<source\b[^>]*src=["\']([^"\']+)["\']/i', $html, $m);
+        $allUrls = array_merge($allUrls, $m[1] ?? []);
+
+        preg_match_all('/srcset=["\']([^"\']+)["\']/i', $html, $m);
+        foreach ($m[1] ?? [] as $srcset) {
+            $parts = preg_split('/\s*,\s*/', $srcset);
+            foreach ($parts as $part) {
+                $part = trim($part);
+                if (preg_match('/^(\S+)/', $part, $sm)) $allUrls[] = $sm[1];
+            }
+        }
+
+        preg_match_all('/src="([^"]+)"/i', $html, $m);
+        foreach ($m[1] ?? [] as $src) {
+            if (strpos($src, 'data:') !== 0 && strpos($src, '#') !== 0 && strpos($src, 'proxy.php') === false) {
+                $allUrls[] = $src;
+            }
+        }
+
+        preg_match_all('/<meta\b[^>]*content=["\']([^"\']+\.(?:jpg|jpeg|png|gif|webp|ico)[^"\']*)["\']/i', $html, $m);
+        foreach ($m[1] ?? [] as $url) {
+            if (strpos($url, 'http') === 0 || strpos($url, '/') === 0) $allUrls[] = $url;
+        }
+
+        preg_match_all('/<link\b[^>]*href=["\']([^"\']+\.(?:png|jpg|jpeg|gif|webp|ico)[^"\']*)["\']/i', $html, $m);
+        foreach ($m[1] ?? [] as $url) $allUrls[] = $url;
+
+        $urlMap = [];
+        foreach (array_unique($allUrls) as $url) {
+            if (isset($urlMap[$url])) continue;
+            $resolved = $this->resolveUrl($url);
+            if (strpos($resolved, 'data:') === 0) continue;
+            $host = parse_url($resolved, PHP_URL_HOST) ?? '';
+            if ($host !== $this->sourceDomain && !str_ends_with($host, '.' . $this->sourceDomain)) continue;
+
+            $content = $this->fetchUrl($resolved);
+            if ($content === null) { $urlMap[$url] = $url; continue; }
+
+            $path = parse_url($resolved, PHP_URL_PATH);
+            $basename = basename($path);
+            $basename = preg_replace('/[^a-zA-Z0-9._-]/', '_', $basename);
+            if (empty($basename) || $basename === '_') $basename = md5($url) . '.bin';
+
+            $safeName = $basename;
+            $counter = 0;
+            while (file_exists($assetsDir . '/' . $safeName)) {
+                $counter++;
+                $ext = pathinfo($basename, PATHINFO_EXTENSION);
+                $name = pathinfo($basename, PATHINFO_FILENAME);
+                $safeName = $name . '_' . $counter . ($ext ? '.' . $ext : '');
+            }
+
+            file_put_contents($assetsDir . '/' . $safeName, $content);
+            $urlMap[$url] = 'assets/' . $safeName;
+        }
+
+        foreach ($urlMap as $original => $local) {
+            if ($original === $local) continue;
+            $escaped = preg_quote($original, '/');
+            $html = preg_replace('#' . $escaped . '#', $local, $html);
+        }
+
+        return $html;
+    }
+
+    public function rewriteRemainingUrls(string $html, string $assetsDir): string
+    {
+        $cssFiles = glob($assetsDir . '/*.css');
+        foreach ($cssFiles as $cssFile) {
+            $css = file_get_contents($cssFile);
+            $rewritten = false;
+
+            $css = preg_replace_callback('/url\(\s*[\'"]?([^\'")\s]+)[\'"]?\s*\)/i', function($m) use ($assetsDir, &$rewritten) {
+                $url = $m[1];
+                if (strpos($url, 'data:') === 0 || strpos($url, '#') === 0) return $m[0];
+
+                $resolved = $this->resolveUrl($url);
+
+                $path = parse_url($resolved, PHP_URL_PATH);
+                $basename = basename($path);
+                $basename = preg_replace('/[^a-zA-Z0-9._-]/', '_', $basename);
+                if (empty($basename) || $basename === '_') $basename = md5($url) . '.bin';
+
+                $existingFile = null;
+                foreach (glob($assetsDir . '/*') as $f) {
+                    if (basename($f) === $basename) { $existingFile = $f; break; }
+                }
+
+                if ($existingFile) {
+                    $rewritten = true;
+                    return "url('../assets/" . basename($existingFile) . "')";
+                }
+
+                $content = $this->fetchUrl($resolved);
+                if ($content) {
+                    file_put_contents($assetsDir . '/' . $basename, $content);
+                    $rewritten = true;
+                    return "url('../assets/" . $basename . "')";
+                }
+
+                return $m[0];
+            }, $css);
+
+            if ($rewritten) file_put_contents($cssFile, $css);
+        }
+
+        return $html;
+    }
+
     public static function rewriteForPreview(string $html, string $sourceDomain): string
     {
         if (empty($sourceDomain)) return $html;
@@ -276,25 +400,34 @@ class AssetProcessor
 
         $combinedCss = '';
         $seen = [];
+        $cdnLinks = [];
 
         foreach ($allLinks as $cssUrl) {
-            $cssUrl = $this->resolveUrl($cssUrl);
-            if (isset($seen[$cssUrl])) continue;
-            $seen[$cssUrl] = true;
+            $resolved = $this->resolveUrl($cssUrl);
+            if (isset($seen[$resolved])) continue;
+            $seen[$resolved] = true;
 
-            $cssContent = $this->fetchUrl($cssUrl);
-            if ($cssContent === null) continue;
+            $host = parse_url($resolved, PHP_URL_HOST) ?? '';
+            $isSourceCss = ($host === $this->sourceDomain || str_ends_with($host, '.' . $this->sourceDomain));
 
-            $cssDir = dirname(parse_url($cssUrl, PHP_URL_PATH));
+            if (!$isSourceCss) {
+                $cdnLinks[] = $cssUrl;
+                continue;
+            }
+
+            $cssContent = $this->fetchUrl($resolved);
+            if ($cssContent === null) { $cdnLinks[] = $cssUrl; continue; }
+
+            $cssDir = dirname(parse_url($resolved, PHP_URL_PATH));
             $cssContent = $this->rewriteCssUrls($cssContent, $cssDir);
-            $combinedCss .= "\n/* {$cssUrl} */\n{$cssContent}\n";
+            $combinedCss .= "\n/* {$resolved} */\n{$cssContent}\n";
         }
-
-        if (empty($combinedCss)) return $html;
 
         $html = preg_replace('/<link\b[^>]*(?:rel=["\']stylesheet["\'][^>]*href=["\'][^"\']+["\']|href=["\'][^"\']+["\'][^>]*rel=["\']stylesheet["\'][^>]*)\/?>/i', '', $html);
 
-        $html = preg_replace('/<\/head>/i', "<style data-cloned=\"true\">\n{$combinedCss}\n</style>\n</head>", $html, 1);
+        if (!empty($combinedCss)) {
+            $html = preg_replace('/<\/head>/i', "<style data-cloned=\"true\">\n{$combinedCss}\n</style>\n</head>", $html, 1);
+        }
 
         return $html;
     }
