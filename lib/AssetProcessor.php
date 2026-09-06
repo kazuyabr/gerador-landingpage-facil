@@ -169,6 +169,169 @@ class AssetProcessor
         return $html;
     }
 
+    public static function rewriteForZip(string $html, string $sourceDomain): string
+    {
+        if (empty($sourceDomain)) return $html;
+
+        $baseUrl = "https://{$sourceDomain}";
+
+        $html = self::rewriteLinkTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteImgTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteScriptTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteSourceTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteMetaTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteInlineCssUrlsZip($html, $baseUrl, $sourceDomain);
+        $html = self::rewriteStyleTagsZip($html, $baseUrl, $sourceDomain);
+        $html = self::fixLazyLoadingForPreview($html);
+        $html = self::addCdnResources($html);
+
+        return $html;
+    }
+
+    private static function proxyUrlZip(string $url, string $baseUrl): string
+    {
+        if (strpos($url, '//') === 0) {
+            $url = 'https:' . $url;
+        } elseif (strpos($url, '/') === 0) {
+            $url = $baseUrl . $url;
+        } elseif (strpos($url, 'http') !== 0) {
+            $url = $baseUrl . '/' . $url;
+        }
+        return 'proxy.php?url=' . urlencode($url);
+    }
+
+    private static function rewriteLinkTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/<link\b([^>]*)>/i', function($m) use ($baseUrl, $sourceDomain) {
+            $tag = $m[0];
+            $attrs = $m[1];
+            if (preg_match('/href=["\']([^"\']+)["\']/i', $attrs, $hm)) {
+                if (self::shouldProxyUrl($hm[1], $sourceDomain)) {
+                    $tag = str_replace($hm[0], 'href="' . self::proxyUrlZip($hm[1], $baseUrl) . '"', $tag);
+                }
+            }
+            return $tag;
+        }, $html);
+    }
+
+    private static function rewriteImgTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        $html = preg_replace_callback('/<img\b([^>]*)>/i', function($m) use ($baseUrl, $sourceDomain) {
+            $tag = $m[0];
+            $attrs = $m[1];
+            if (preg_match('/src=["\']([^"\']+)["\']/i', $attrs, $sm)) {
+                if (self::shouldProxyUrl($sm[1], $sourceDomain)) {
+                    $tag = str_replace($sm[0], 'src="' . self::proxyUrlZip($sm[1], $baseUrl) . '"', $tag);
+                }
+            }
+            if (preg_match('/data-original-src=["\']([^"\']+)["\']/i', $attrs, $dm)) {
+                if (self::shouldProxyUrl($dm[1], $sourceDomain)) {
+                    $tag = str_replace($dm[0], 'data-original-src="' . self::proxyUrlZip($dm[1], $baseUrl) . '"', $tag);
+                }
+            }
+            if (preg_match('/srcset=["\']([^"\']+)["\']/i', $attrs, $ssm)) {
+                $srcset = $ssm[1];
+                $rewritten = preg_replace_callback('/(\S+)(\s+\S+)?,?/', function($part) use ($baseUrl, $sourceDomain) {
+                    $url = trim($part[1]);
+                    if (empty($url)) return $part[0];
+                    if (self::shouldProxyUrl($url, $sourceDomain)) {
+                        $dpr = $part[2] ?? '';
+                        return self::proxyUrlZip($url, $baseUrl) . $dpr . ',';
+                    }
+                    return $part[0];
+                }, $srcset);
+                $tag = str_replace($ssm[0], 'srcset="' . rtrim($rewritten, ',') . '"', $tag);
+            }
+            return $tag;
+        }, $html);
+        return $html;
+    }
+
+    private static function rewriteScriptTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/<script\b([^>]*)>/i', function($m) use ($baseUrl, $sourceDomain) {
+            $tag = $m[0];
+            $attrs = $m[1];
+            if (preg_match('/src=["\']([^"\']+)["\']/i', $attrs, $sm)) {
+                if (self::shouldProxyUrl($sm[1], $sourceDomain)) {
+                    $tag = str_replace($sm[0], 'src="' . self::proxyUrlZip($sm[1], $baseUrl) . '"', $tag);
+                }
+            }
+            return $tag;
+        }, $html);
+    }
+
+    private static function rewriteSourceTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/<source\b([^>]*)>/i', function($m) use ($baseUrl, $sourceDomain) {
+            $tag = $m[0];
+            $attrs = $m[1];
+            if (preg_match('/src=["\']([^"\']+)["\']/i', $attrs, $sm)) {
+                if (self::shouldProxyUrl($sm[1], $sourceDomain)) {
+                    $tag = str_replace($sm[0], 'src="' . self::proxyUrlZip($sm[1], $baseUrl) . '"', $tag);
+                }
+            }
+            if (preg_match('/srcset=["\']([^"\']+)["\']/i', $attrs, $ssm)) {
+                $srcset = $ssm[1];
+                $rewritten = preg_replace_callback('/(\S+)(\s+\S+)?,?/', function($part) use ($baseUrl, $sourceDomain) {
+                    $url = trim($part[1]);
+                    if (empty($url)) return $part[0];
+                    if (self::shouldProxyUrl($url, $sourceDomain)) {
+                        $dpr = $part[2] ?? '';
+                        return self::proxyUrlZip($url, $baseUrl) . $dpr . ',';
+                    }
+                    return $part[0];
+                }, $srcset);
+                $tag = str_replace($ssm[0], 'srcset="' . rtrim($rewritten, ',') . '"', $tag);
+            }
+            return $tag;
+        }, $html);
+    }
+
+    private static function rewriteMetaTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/<meta\b([^>]*)>/i', function($m) use ($baseUrl, $sourceDomain) {
+            $tag = $m[0];
+            $attrs = $m[1];
+            if (preg_match('/content=["\']([^"\']+)["\']/i', $attrs, $cm)) {
+                $content = $cm[1];
+                if (preg_match('/\.(jpg|jpeg|png|gif|webp|ico)/i', $content) && self::shouldProxyUrl($content, $sourceDomain)) {
+                    $tag = str_replace($cm[0], 'content="' . self::proxyUrlZip($content, $baseUrl) . '"', $tag);
+                }
+            }
+            return $tag;
+        }, $html);
+    }
+
+    private static function rewriteInlineCssUrlsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/style=["\']([^"\']+)["\']/i', function($m) use ($baseUrl, $sourceDomain) {
+            $css = $m[1];
+            $css = preg_replace_callback('/url\(\s*[\'"]?([^\'")\s]+)[\'"]?\s*\)/i', function($u) use ($baseUrl, $sourceDomain) {
+                if (self::shouldProxyUrl($u[1], $sourceDomain)) {
+                    return 'url("' . self::proxyUrlZip($u[1], $baseUrl) . '")';
+                }
+                return $u[0];
+            }, $css);
+            return 'style="' . $css . '"';
+        }, $html);
+    }
+
+    private static function rewriteStyleTagsZip(string $html, string $baseUrl, string $sourceDomain): string
+    {
+        return preg_replace_callback('/<style\b([^>]*)>(.*?)<\/style>/is', function($m) use ($baseUrl, $sourceDomain) {
+            $attrs = $m[1];
+            $css = $m[2];
+            $css = preg_replace_callback('/url\(\s*[\'"]?([^\'")\s]+)[\'"]?\s*\)/i', function($u) use ($baseUrl, $sourceDomain) {
+                if (self::shouldProxyUrl($u[1], $sourceDomain)) {
+                    return 'url("' . self::proxyUrlZip($u[1], $baseUrl) . '")';
+                }
+                return $u[0];
+            }, $css);
+            return '<style' . $attrs . '>' . $css . '</style>';
+        }, $html);
+    }
+
     private static function shouldProxyUrl(string $url, string $sourceDomain): bool
     {
         if (empty($url)) return false;

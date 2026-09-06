@@ -15,31 +15,20 @@ class ZipBuilder
             mkdir($tmpDir, 0777, true);
         }
 
-        $assetsDir = $tmpDir . DIRECTORY_SEPARATOR . 'assets';
-        if (!is_dir($assetsDir)) {
-            mkdir($assetsDir, 0777, true);
-        }
-
         $sourceDomain = $metadata['source_domain'] ?? '';
         if (empty($sourceDomain) && preg_match('#https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})#', $html, $m)) {
             $sourceDomain = $m[1];
         }
 
         if (!empty($sourceDomain)) {
-            $processor = new AssetProcessor($sourceDomain);
-            $html = $processor->processForZip($html, $assetsDir);
-        }
-
-        $html = $this->extractDataUris($html, $assetsDir);
-        $html = $this->extractInlineCss($html, $assetsDir);
-
-        if (!empty($sourceDomain)) {
-            $processor = new AssetProcessor($sourceDomain);
-            $html = $processor->rewriteRemainingUrls($html, $assetsDir);
+            $html = AssetProcessor::rewriteForZip($html, $sourceDomain);
         }
 
         $htmlPath = $tmpDir . DIRECTORY_SEPARATOR . 'index.html';
         file_put_contents($htmlPath, $html);
+
+        $proxySource = $this->getProxyScript($sourceDomain);
+        file_put_contents($tmpDir . DIRECTORY_SEPARATOR . 'proxy.php', $proxySource);
 
         $readme = $this->buildReadme($metadata);
         file_put_contents($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME.txt', $readme);
@@ -51,15 +40,99 @@ class ZipBuilder
         }
 
         $zip->addFile($htmlPath, 'index.html');
+        $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'proxy.php', 'proxy.php');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME.txt', 'LEIA-ME.txt');
-
-        $this->addAssetsToZip($zip, $assetsDir, 'assets/');
 
         $zip->close();
 
         $this->cleanup($tmpDir);
 
         return $zipPath;
+    }
+
+    private function getProxyScript(string $sourceDomain): string
+    {
+        return '<?php
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
+
+if ($_SERVER["REQUEST_METHOD"] === "OPTIONS") {
+    http_response_code(200);
+    exit;
+}
+
+$url = $_GET["url"] ?? "";
+if (empty($url)) {
+    http_response_code(400);
+    echo "Missing url parameter";
+    exit;
+}
+
+$url = urldecode($url);
+
+$blocked = [
+    "google-analytics.com", "googletagmanager.com", "google.com", "googleapis.com",
+    "facebook.net", "facebook.com", "doubleclick.net",
+    "cdnjs.cloudflare.com", "cloudflare.com",
+    "taboola.com", "outbrain.com", "hotjar.com",
+    "cloudflareinsights.com", "youtube.com",
+    "googlesyndication.com", "googleadservices.com",
+];
+
+$host = parse_url($url, PHP_URL_HOST) ?? "";
+foreach ($blocked as $domain) {
+    if ($host === $domain || substr($host, -(strlen($domain) + 1)) === "." . $domain) {
+        http_response_code(403);
+        echo "Blocked";
+        exit;
+    }
+}
+
+$ch = curl_init();
+curl_setopt_array($ch, [
+    CURLOPT_URL => $url,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_MAXREDIRS => 5,
+    CURLOPT_TIMEOUT => 30,
+    CURLOPT_SSL_VERIFYPEER => false,
+    CURLOPT_USERAGENT => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    CURLOPT_HTTPHEADER => [
+        "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    ],
+]);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+curl_close($ch);
+
+if ($response === false || $httpCode >= 400) {
+    http_response_code(502);
+    echo "Failed to fetch";
+    exit;
+}
+
+$mime = $contentType ?: "application/octet-stream";
+if (strpos($mime, "text/html") !== false) $mime = "text/html";
+elseif (strpos($mime, "text/css") !== false) $mime = "text/css";
+elseif (strpos($mime, "application/javascript") !== false || strpos($mime, "text/javascript") !== false) $mime = "application/javascript";
+elseif (strpos($mime, "image/jpeg") !== false) $mime = "image/jpeg";
+elseif (strpos($mime, "image/png") !== false) $mime = "image/png";
+elseif (strpos($mime, "image/gif") !== false) $mime = "image/gif";
+elseif (strpos($mime, "image/webp") !== false) $mime = "image/webp";
+elseif (strpos($mime, "image/svg") !== false) $mime = "image/svg+xml";
+elseif (strpos($mime, "font/woff") !== false) $mime = "font/woff";
+elseif (strpos($mime, "font/woff2") !== false) $mime = "font/woff2";
+elseif (strpos($mime, "application/font") !== false) $mime = "font/woff2";
+
+header("Content-Type: " . $mime);
+header("Cache-Control: public, max-age=86400");
+header("Access-Control-Allow-Origin: *");
+echo $response;
+';
     }
 
     public function buildWixEmbed(string $html, string $jobId, string $affiliateLink, string $sourceDomain = ''): string
