@@ -26,6 +26,7 @@ class Cloner
         }
 
         $html = $this->detectAndReplaceCtas($html, $affiliateLink);
+        $html = $this->removeTrackingScripts($html);
 
         $html = preg_replace('/[\x{FEFF}]/u', '', $html);
 
@@ -112,6 +113,56 @@ class Cloner
         }, $html);
 
         $this->lastCtas = $ctas;
+        return $html;
+    }
+
+    private function removeTrackingScripts(string $html): string
+    {
+        $trackingPatterns = [
+            '/<script[^>]*googletagmanager\.com[^>]*><\/script>/is',
+            '/<script[^>]*cloudflareinsights\.com[^>]*><\/script>/is',
+            '/<script[^>]*facebook\.net\/en_US\/fbevents\.js[^>]*><\/script>/is',
+            '/<script[^>]*connect\.facebook\.net[^>]*><\/script>/is',
+            '/<script[^>]*analytics\.tiktok\.com[^>]*><\/script>/is',
+            '/<script[^>]*snap\.licdn\.com[^>]*><\/script>/is',
+            '/<script[^>]*bat\.bing\.com[^>]*><\/script>/is',
+            '/<script[^>]*hotjar\.com[^>]*><\/script>/is',
+            '/<script[^>]*mc\.yandex\.ru[^>]*><\/script>/is',
+            '/<script[^>]*pagead2\.googlesyndication\.com[^>]*><\/script>/is',
+            '/<script[^>]*adservice\.google\.com[^>]*><\/script>/is',
+            '/<script[^>]*taboola\.com[^>]*><\/script>/is',
+            '/<script[^>]*outbrain\.com[^>]*><\/script>/is',
+        ];
+
+        foreach ($trackingPatterns as $pattern) {
+            $html = preg_replace($pattern, '', $html);
+        }
+
+        $html = preg_replace_callback('/<script[^>]*>(.*?)<\/script>/is', function($m) {
+            $content = $m[1];
+            $inlinePatterns = [
+                '/window\.dataLayer\s*=\s*window\.dataLayer\s*\|\|\s*\[\];\s*function\s+gtag\s*\(\)/s',
+                '/gtag\(\s*[\'"]event/s',
+                '/fbevents\.js/s',
+                '/_fbq\s*=/s',
+                '/fbevents\.init/s',
+                '/dataLayer\.push\s*\(\s*\{[^}]*event\s*:/s',
+                '/function\s+gtag\s*\(\)\s*\{dataLayer\.push/s',
+                '/if\s*\(\s*!window\.gtag/s',
+                '/window\._linkedin_data_partner_ids/s',
+                '/_linkedin_data_partner_ids\s*=/s',
+                '/gtm\.start/s',
+            ];
+
+            foreach ($inlinePatterns as $pattern) {
+                if (preg_match($pattern, $content)) {
+                    return '<!-- tracking removed -->';
+                }
+            }
+
+            return $m[0];
+        }, $html);
+
         return $html;
     }
 
