@@ -2,8 +2,6 @@
 
 class ZipBuilder
 {
-    private ?MediaDownloader $downloader = null;
-
     public function buildHtmlZip(string $html, string $jobId, array $metadata = []): string
     {
         if (!class_exists('ZipArchive')) {
@@ -14,6 +12,14 @@ class ZipBuilder
         if (!is_dir($tmpDir)) {
             mkdir($tmpDir, 0777, true);
         }
+
+        $assetsDir = $tmpDir . DIRECTORY_SEPARATOR . 'assets';
+        if (!is_dir($assetsDir)) {
+            mkdir($assetsDir, 0777, true);
+        }
+
+        $html = $this->extractDataUris($html, $assetsDir);
+        $html = $this->extractInlineCss($html, $assetsDir);
 
         $htmlPath = $tmpDir . DIRECTORY_SEPARATOR . 'index.html';
         file_put_contents($htmlPath, $html);
@@ -30,7 +36,11 @@ class ZipBuilder
         $zip->addFile($htmlPath, 'index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME.txt', 'LEIA-ME.txt');
 
+        $this->addAssetsToZip($zip, $assetsDir, 'assets/');
+
         $zip->close();
+
+        $this->cleanup($tmpDir);
 
         return $zipPath;
     }
@@ -42,13 +52,21 @@ class ZipBuilder
             mkdir($tmpDir, 0777, true);
         }
 
+        $assetsDir = $tmpDir . DIRECTORY_SEPARATOR . 'landingpage' . DIRECTORY_SEPARATOR . 'assets';
+        if (!is_dir($assetsDir)) {
+            mkdir($assetsDir, 0777, true);
+        }
+
+        $html = $this->extractDataUris($html, $assetsDir);
+        $html = $this->extractInlineCss($html, $assetsDir);
+
         $embedHtml = $this->buildWixEmbedContent($affiliateLink);
         file_put_contents($tmpDir . DIRECTORY_SEPARATOR . 'wix-embed.html', $embedHtml);
 
         $readme = $this->buildWixReadme($affiliateLink);
         file_put_contents($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME-WIX.txt', $readme);
 
-        $htmlHostedPath = $tmpDir . DIRECTORY_SEPARATOR . 'index.html';
+        $htmlHostedPath = $tmpDir . DIRECTORY_SEPARATOR . 'landingpage' . DIRECTORY_SEPARATOR . 'index.html';
         file_put_contents($htmlHostedPath, $html);
 
         $zip = new ZipArchive();
@@ -57,7 +75,12 @@ class ZipBuilder
         $zip->addFile($htmlHostedPath, 'landingpage/index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'wix-embed.html', 'wix-embed.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'LEIA-ME-WIX.txt', 'LEIA-ME-WIX.txt');
+
+        $this->addAssetsToZip($zip, $assetsDir, 'landingpage/assets/');
+
         $zip->close();
+
+        $this->cleanup($tmpDir);
 
         return $zipPath;
     }
@@ -73,10 +96,15 @@ class ZipBuilder
             mkdir($tmpDir, 0777, true);
         }
 
-        $htmlPath = $tmpDir . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.html';
-        if (!is_dir(dirname($htmlPath))) {
-            mkdir(dirname($htmlPath), 0777, true);
+        $assetsDir = $tmpDir . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'assets';
+        if (!is_dir($assetsDir)) {
+            mkdir($assetsDir, 0777, true);
         }
+
+        $html = $this->extractDataUris($html, $assetsDir);
+        $html = $this->extractInlineCss($html, $assetsDir);
+
+        $htmlPath = $tmpDir . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . 'index.html';
         file_put_contents($htmlPath, $html);
 
         $htaccess = $this->buildHtaccess();
@@ -91,9 +119,109 @@ class ZipBuilder
         $zip->addFile($htmlPath, 'public_html/index.html');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'public_html' . DIRECTORY_SEPARATOR . '.htaccess', 'public_html/.htaccess');
         $zip->addFile($tmpDir . DIRECTORY_SEPARATOR . 'INSTRUCOES-HOSTINGER.txt', 'INSTRUCOES-HOSTINGER.txt');
+
+        $this->addAssetsToZip($zip, $assetsDir, 'public_html/assets/');
+
         $zip->close();
 
+        $this->cleanup($tmpDir);
+
         return $zipPath;
+    }
+
+    private function extractDataUris(string $html, string $assetsDir): string
+    {
+        $counter = 0;
+
+        $html = preg_replace_callback('/url\([\'"]data:([^;]+);base64,([A-Za-z0-9+\/=]+)[\'"]\)/i', function($m) use ($assetsDir, &$counter) {
+            $mime = $m[1];
+            $data = base64_decode($m[2]);
+            if ($data === false) return $m[0];
+
+            $ext = $this->mimeToExt($mime);
+            $filename = 'asset_' . (++$counter) . '.' . $ext;
+            $filepath = $assetsDir . DIRECTORY_SEPARATOR . $filename;
+            file_put_contents($filepath, $data);
+
+            return "url('assets/{$filename}')";
+        }, $html);
+
+        $html = preg_replace_callback('/<style[^>]*>(.*?)<\/style>/is', function($m) use ($assetsDir, &$counter) {
+            $css = $m[1];
+            $css = preg_replace_callback('/url\([\'"]data:([^;]+);base64,([A-Za-z0-9+\/=]+)[\'"]\)/i', function($mm) use ($assetsDir, &$counter) {
+                $mime = $mm[1];
+                $data = base64_decode($mm[2]);
+                if ($data === false) return $mm[0];
+
+                $ext = $this->mimeToExt($mime);
+                $filename = 'asset_' . (++$counter) . '.' . $ext;
+                $filepath = $assetsDir . DIRECTORY_SEPARATOR . $filename;
+                file_put_contents($filepath, $data);
+
+                return "url('assets/{$filename}')";
+            }, $css);
+
+            return "<style{$m[0]}>{$css}</style>";
+        }, $html);
+
+        return $html;
+    }
+
+    private function extractInlineCss(string $html, string $assetsDir): string
+    {
+        $counter = 0;
+
+        $html = preg_replace_callback('/<style[^>]*data-cloned="true"[^>]*>(.*?)<\/style>/is', function($m) use ($assetsDir, &$counter) {
+            $css = $m[1];
+            $filename = 'style_' . (++$counter) . '.css';
+            $filepath = $assetsDir . DIRECTORY_SEPARATOR . $filename;
+            file_put_contents($filepath, $css);
+
+            return "<link rel=\"stylesheet\" href=\"assets/{$filename}\">";
+        }, $html);
+
+        return $html;
+    }
+
+    private function addAssetsToZip(ZipArchive $zip, string $assetsDir, string $prefix): void
+    {
+        if (!is_dir($assetsDir)) return;
+
+        $it = new RecursiveDirectoryIterator($assetsDir, RecursiveDirectoryIterator::SKIP_DOTS);
+        $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+
+        foreach ($files as $file) {
+            if ($file->isFile()) {
+                $relative = $prefix . substr($file->getRealPath(), strlen($assetsDir) + 1);
+                $zip->addFile($file->getRealPath(), $relative);
+            }
+        }
+    }
+
+    private function mimeToExt(string $mime): string
+    {
+        $map = [
+            'font/woff' => 'woff', 'font/woff2' => 'woff2', 'font/ttf' => 'ttf',
+            'application/vnd.ms-fontobject' => 'eot', 'font/otf' => 'otf',
+            'image/png' => 'png', 'image/jpeg' => 'jpg', 'image/gif' => 'gif',
+            'image/webp' => 'webp', 'image/svg+xml' => 'svg', 'image/x-icon' => 'ico',
+        ];
+        return $map[$mime] ?? 'bin';
+    }
+
+    private function cleanup(string $dir): void
+    {
+        if (!is_dir($dir)) return;
+        $it = new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS);
+        $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($files as $file) {
+            if ($file->isDir()) {
+                @rmdir($file->getRealPath());
+            } else {
+                @unlink($file->getRealPath());
+            }
+        }
+        @rmdir($dir);
     }
 
     private function buildReadme(array $metadata): string
@@ -124,16 +252,9 @@ CTAS DETECTADOS E SUBSTITUIDOS ({$this->count($ctas)}):
 COMO USAR:
 ----------
 1. Faca upload de TODOS os arquivos para sua hospedagem
-2. Pode ser hospedagem comum (Hostinger, Locaweb, etc) ou estatica (Vercel, Netlify)
+2. Pode ser hospedagem comum (Hostinger, Locaweb, etc)
 3. Os links de CTA ja apontam para seu link de afiliado
-4. Recursos externos (CSS, imagens, fontes) sao carregados dos servidores originais
-
-NOTA:
------
-O HTML referencia arquivos externos do site original.
-Para funcionar offline, hospede o arquivo index.html em sua propria hospedagem.
-
-Suporte: Este e um MVP gratuito, sem suporte oficial.
+4. Todos os recursos (CSS, imagens, fonts) estao incluidos
 
 ========================================
 TXT;
@@ -141,8 +262,7 @@ TXT;
 
     private function buildWixEmbedContent(string $affiliateLink): string
     {
-        $affiliateLinkEscaped = htmlspecialchars($affiliateLink, ENT_QUOTES, 'UTF-8');
-
+        $link = htmlspecialchars($affiliateLink, ENT_QUOTES, 'UTF-8');
         return <<<HTML
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -155,21 +275,7 @@ TXT;
   </style>
 </head>
 <body>
-  <!--
-    IMPORTANTE: Substitua "SUA_URL_AQUI" pela URL onde voce hospedou o arquivo
-    landingpage/index.html. Pode ser:
-      - GitHub Pages
-      - Vercel
-      - Netlify
-      - Sua hospedagem comum
-  -->
-  <iframe
-    src="SUA_URL_AQUI/landingpage/index.html"
-    width="100%"
-    height="100%"
-    frameborder="0"
-    allowfullscreen>
-  </iframe>
+  <iframe src="SUA_URL_AQUI/landingpage/index.html" width="100%" height="100%" frameborder="0" allowfullscreen></iframe>
 </body>
 </html>
 HTML;
@@ -178,42 +284,16 @@ HTML;
     private function buildWixReadme(string $affiliateLink): string
     {
         $link = htmlspecialchars($affiliateLink, ENT_QUOTES, 'UTF-8');
-
         return <<<TXT
 ========================================
 COMO USAR NO WIX
 ========================================
 
-Este pacote contem 2 itens:
-  1. landingpage/index.html  -> O clone da pagina com seus CTAs
-  2. wix-embed.html          -> Pagina HTML que faz embed via iframe
+1. hospede landingpage/index.html em um host gratuito
+2. Abra wix-embed.html e troque SUA_URL_AQUI pela URL publica
+3. No Wix, adicione um elemento HTML iframe e cole o conteudo
 
-PASSO A PASSO:
---------------
-
-OPCAO A - Hospedar a landing page fora do Wix e fazer embed:
-
-  1. Pegue o arquivo landingpage/index.html
-  2. Suba para um host gratuito:
-     - Vercel: https://vercel.com (recomendado, rapido)
-     - Netlify: https://netlify.com
-     - GitHub Pages
-  3. Abra o arquivo wix-embed.html e troque "SUA_URL_AQUI"
-     pela URL publica onde ficou hospedado o index.html
-  4. No painel do Wix:
-     - Adicione um elemento "HTML iframe" ou "Incorporar"
-     - Cole o conteudo do wix-embed.html
-     - Ou use o codigo direto do iframe apontando para sua URL
-
-OPCAO B - Upload direto no Wix (limitado):
-
-  O Wix nao permite upload de HTML puro diretamente. Voce precisa
-  usar um elemento "HTML Code" dentro do Editor Wix e colar o
-  iframe manualmente.
-
-Seu link de afiliado configurado:
-  {$link}
-
+Seu link de afiliado: {$link}
 ========================================
 TXT;
     }
@@ -221,45 +301,18 @@ TXT;
     private function buildHostingerInstructions(array $metadata): string
     {
         $link = $metadata['affiliate_link'] ?? '(nao definido)';
-
         return <<<TXT
 ========================================
 COMO SUBIR NO HOSTINGER
 ========================================
 
-Este pacote contem a estrutura pronta para upload:
-  - public_html/index.html
-  - public_html/.htaccess
+1. Acesse hpanel.hostinger.com
+2. Va em "Gerenciador de Arquivos"
+3. Navegue ate public_html
+4. Faca upload de TODOS os arquivos
+5. Pronto!
 
-METODO 1 - File Manager (Mais facil):
---------------------------------------
-  1. Acesse hpanel.hostinger.com
-  2. Va em "Gerenciador de Arquivos" (File Manager)
-  3. Navegue ate a pasta public_html do seu dominio
-  4. Faca upload de TODOS os arquivos da pasta public_html deste ZIP
-  5. Pronto! Acesse seu dominio no navegador
-
-METODO 2 - FTP (Mais avancado):
---------------------------------
-  1. Pegue as credenciais FTP no painel da Hostinger
-     (Avancado > Acesso FTP)
-  2. Use um cliente FTP como FileZilla
-  3. Conecte-se e navegue ate public_html
-  4. Faca upload da pasta public_html deste ZIP
-
-METODO 3 - Subdominio (recomendado para teste):
-------------------------------------------------
-  1. Crie um subdominio (ex: lp.seusite.com)
-  2. Aponte para uma pasta separada
-  3. Suba os arquivos la
-  4. Teste antes de colocar no dominio principal
-
-Seu link de afiliado configurado:
-  {$link}
-
-IMPORTANTE: O arquivo .htaccess ja vem com configuracoes
-basicas de cache e seguranca. Pode customizar se precisar.
-
+Seu link de afiliado: {$link}
 ========================================
 TXT;
     }
@@ -267,28 +320,20 @@ TXT;
     private function buildHtaccess(): string
     {
         return <<<HTACCESS
-# Basic cache and compression
 <IfModule mod_deflate.c>
-  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript
 </IfModule>
-
 <IfModule mod_expires.c>
   ExpiresActive On
   ExpiresByType text/css "access plus 1 month"
   ExpiresByType application/javascript "access plus 1 month"
   ExpiresByType image/png "access plus 1 year"
-  ExpiresByType image/jpg "access plus 1 year"
   ExpiresByType image/jpeg "access plus 1 year"
   ExpiresByType image/webp "access plus 1 year"
   ExpiresByType image/svg+xml "access plus 1 year"
 </IfModule>
-
-# Charset
 AddDefaultCharset UTF-8
-
-# Disable directory listing
 Options -Indexes
-
 HTACCESS;
     }
 
