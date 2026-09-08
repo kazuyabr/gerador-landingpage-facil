@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "9876:9876"
+    volumes:
+      - ./data:/app/data
+      - ./pages:/app/pages
+      - ./uploads:/app/uploads
+    environment:
+      - DOCKER=true
+    container_name: afiliafacil
